@@ -137,8 +137,6 @@ def init_data():
     if not db.query(Room).filter(Room.name == "global").first():
         db.add(Room(name="global", created_by=admin.id))
 
-    if not db.query(Channel).filter(Channel.name == "Общий").first():
-        db.add(Channel(name="Общий", avatar_url="", created_by=admin.id))
 
     if not db.query(Boss).first():
         db.add(Boss(name="Goblin King", hp=2000, max_hp=2000, attack=40, defense=12, abilities=["smash"], is_active=True))

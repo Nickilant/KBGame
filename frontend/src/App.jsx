@@ -206,7 +206,7 @@ export function App() {
         <main className="feed-page card">
           <aside className="channels-sidebar">
             <div className="channels-header">Каналы {isBoss && <><span>|</span><button onClick={() => setShowChannelModal(true)} className="add-channel-btn">+</button></>}</div>
-            <div className="channels-list">{channels.map((c) => <button key={c.id} className={`channel-item ${selectedChannelId === c.id ? 'active' : ''}`} onClick={() => setSelectedChannelId(c.id)}><img src={c.avatar_url ? `${api.defaults.baseURL}${c.avatar_url}` : 'https://placehold.co/40x40/1f2433/ffffff?text=%23'} alt={c.name} /><div className="channel-main"><span>{c.name}</span><small>{c.unread_count}</small></div></button>)}</div>
+            <div className="channels-list">{channels.length === 0 ? <div className="channels-empty">Каналов пока нет</div> : channels.map((c) => <button key={c.id} className={`channel-item ${selectedChannelId === c.id ? 'active' : ''}`} onClick={() => setSelectedChannelId(c.id)}><img src={c.avatar_url ? `${api.defaults.baseURL}${c.avatar_url}` : 'https://placehold.co/40x40/1f2433/ffffff?text=%23'} alt={c.name} /><div className="channel-main"><span>{c.name}</span>{c.unread_count > 0 && <small>{c.unread_count}</small>}</div></button>)}</div>
           </aside>
 
           <section className="posts-column">
