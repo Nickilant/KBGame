@@ -194,7 +194,7 @@ export function App() {
                   <div className="post-body">
                     <p className="post-text">{p.content}</p>
                     <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
-                    <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}>Комментарии {p.comment_count}</button>
+                    <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}><span>{p.comment_count > 0 ? `Комментариев ${p.comment_count}` : "Прокоментировать"}</span><span className="row-arrow">›</span></button>
                   </div>
                 </article>
 
@@ -248,7 +248,7 @@ export function App() {
       {commentModalPost && (
         <div className="modal-backdrop">
           <div className="modal card">
-            <button className="close-top" onClick={() => setCommentModalPost(null)}>Закрыть</button>
+            <button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button>
             <h3>Комментарии</h3>
             <div className="comments-list fixed" ref={commentsRef}>
               {comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}
@@ -256,10 +256,12 @@ export function App() {
             </div>
             <div className="comment-input-wrap">
               <input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" />
-              <button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>😊</button>
+              <div className="comment-actions-right">
+                <button className="send-inline" onClick={sendComment}>›</button>
+                <button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button>
+                {showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}
+              </div>
             </div>
-            {showCommentEmoji && <div className="emoji-picker">{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}
-            <button onClick={sendComment}>Отправить</button>
           </div>
         </div>
       )}
