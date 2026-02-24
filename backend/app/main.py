@@ -1,3 +1,4 @@
+import base64
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket
@@ -130,22 +131,49 @@ def raid_attack(user: User = Depends(require_roles("player", "master_admin")), d
     return AttackOut(damage=damage, boss_hp=hp)
 
 
+def _room_to_dict(room: Room) -> dict:
+    invite_code = base64.urlsafe_b64encode(str(room.id).encode()).decode().rstrip("=")
+    return {"id": room.id, "name": room.name, "created_by": room.created_by, "invite_code": invite_code}
+
+
 @app.post("/api/rooms")
 def create_room(payload: RoomIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if db.query(Room).filter(Room.name == payload.name).first():
+        raise HTTPException(400, "Room already exists")
     room = Room(name=payload.name, created_by=user.id)
     db.add(room)
     db.commit()
     db.refresh(room)
-    return room
+    return _room_to_dict(room)
 
 
 @app.get("/api/rooms")
 def list_rooms(db: Session = Depends(get_db)):
-    return db.query(Room).all()
+    rooms = db.query(Room).all()
+    rooms = sorted(rooms, key=lambda room: (0 if room.name == "global" else 1, room.name.lower()))
+    return [_room_to_dict(room) for room in rooms]
+
+
+@app.get("/api/rooms/join/{invite_code}")
+def join_room(invite_code: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    padding = "=" * (-len(invite_code) % 4)
+    try:
+        room_id = int(base64.urlsafe_b64decode((invite_code + padding).encode()).decode())
+    except Exception:
+        raise HTTPException(400, "Invalid invite code")
+
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+    return _room_to_dict(room)
 
 
 @app.post("/api/chat/messages")
 def send_message(payload: MessageIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == payload.room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+
     msg = Message(room_id=payload.room_id, user_id=user.id, content=payload.content)
     db.add(msg)
     db.commit()
@@ -180,7 +208,14 @@ def create_post(payload: PostIn, user: User = Depends(require_roles("master_admi
 @app.get("/api/news")
 def list_posts(db: Session = Depends(get_db)):
     likes = db.query(PostLike.post_id, func.count(PostLike.id).label("likes")).group_by(PostLike.post_id).subquery()
-    rows = db.query(Post, likes.c.likes).outerjoin(likes, likes.c.post_id == Post.id).order_by(Post.created_at.desc()).all()
+    rows = (
+        db.query(Post, likes.c.likes)
+        .join(User, User.id == Post.created_by)
+        .outerjoin(likes, likes.c.post_id == Post.id)
+        .filter(User.role == "boss")
+        .order_by(Post.created_at.desc())
+        .all()
+    )
     return [{"id": p.id, "title": p.title, "content": p.content, "image_url": p.image_url, "video_url": p.video_url, "created_at": p.created_at, "likes": l or 0} for p, l in rows]
 
 
