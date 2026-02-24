@@ -13,6 +13,9 @@ export function App() {
   const [posts, setPosts] = useState([])
   const [inventory, setInventory] = useState([])
   const [users, setUsers] = useState([])
+  const [authMode, setAuthMode] = useState('login')
+  const [authError, setAuthError] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
 
@@ -39,8 +42,39 @@ export function App() {
   const login = async (e) => {
     e.preventDefault()
     const f = new FormData(e.target)
-    const { data } = await api.post('/api/auth/login', { username: f.get('username'), password: f.get('password') })
-    setToken(data.access_token)
+    setAuthError('')
+    setAuthMessage('')
+    try {
+      const { data } = await api.post('/api/auth/login', { username: f.get('username'), password: f.get('password') })
+      setToken(data.access_token)
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || 'Не удалось войти')
+    }
+  }
+
+  const register = async (e) => {
+    e.preventDefault()
+    const f = new FormData(e.target)
+    const username = (f.get('username') || '').toString().trim()
+    const password = (f.get('password') || '').toString()
+    const confirm = (f.get('confirmPassword') || '').toString()
+
+    setAuthError('')
+    setAuthMessage('')
+
+    if (password !== confirm) {
+      setAuthError('Пароли не совпадают')
+      return
+    }
+
+    try {
+      await api.post('/api/auth/register', { username, password })
+      setAuthMode('login')
+      setAuthMessage('Регистрация успешна. Теперь войдите в аккаунт.')
+      e.target.reset()
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || 'Не удалось зарегистрироваться')
+    }
   }
 
   const attack = async () => {
@@ -56,7 +90,49 @@ export function App() {
   }
 
   if (!token) {
-    return <form className="card" onSubmit={login}><h1>KB Raid Login</h1><input name="username" placeholder="username"/><input name="password" placeholder="password" type="password"/><button>Login</button></form>
+    return (
+      <div className="auth-page">
+        <div className="auth-card card">
+          <p className="auth-eyebrow">KB Raid Arena</p>
+          <h1>{authMode === 'login' ? 'Добро пожаловать' : 'Создать аккаунт'}</h1>
+          <p className="auth-subtitle">
+            {authMode === 'login'
+              ? 'Войдите, чтобы продолжить бой с боссами и общение в чате.'
+              : 'Зарегистрируйтесь и начните приключение в мире рейдов.'}
+          </p>
+
+          {authError && <div className="auth-alert auth-error">{authError}</div>}
+          {authMessage && <div className="auth-alert auth-success">{authMessage}</div>}
+
+          {authMode === 'login' ? (
+            <form className="auth-form" onSubmit={login}>
+              <input name="username" placeholder="Логин" required minLength={3} />
+              <input name="password" placeholder="Пароль" type="password" required minLength={6} />
+              <button type="submit">Войти</button>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={register}>
+              <input name="username" placeholder="Логин" required minLength={3} />
+              <input name="password" placeholder="Пароль" type="password" required minLength={6} />
+              <input name="confirmPassword" placeholder="Повторите пароль" type="password" required minLength={6} />
+              <button type="submit">Зарегистрироваться</button>
+            </form>
+          )}
+
+          <button
+            type="button"
+            className="auth-switch"
+            onClick={() => {
+              setAuthMode(authMode === 'login' ? 'register' : 'login')
+              setAuthError('')
+              setAuthMessage('')
+            }}
+          >
+            {authMode === 'login' ? 'Нет аккаунта? Зарегистрируйтесь' : 'Уже есть аккаунт? Войти'}
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (

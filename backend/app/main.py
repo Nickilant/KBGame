@@ -1,6 +1,9 @@
+import time
+
 from fastapi import Depends, FastAPI, HTTPException, WebSocket
+from sqlalchemy import func, text
+from sqlalchemy.exc import OperationalError
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .auth import create_access_token, hash_password, verify_password
@@ -27,11 +30,22 @@ from .ws import ws_manager
 
 app = FastAPI(title="KB Raid Game")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-Base.metadata.create_all(bind=engine)
 
 
 @app.on_event("startup")
 def init_data():
+    max_retries = 10
+    for attempt in range(1, max_retries + 1):
+        try:
+            with engine.begin() as connection:
+                connection.execute(text("SELECT 1"))
+            Base.metadata.create_all(bind=engine)
+            break
+        except OperationalError:
+            if attempt == max_retries:
+                raise
+            time.sleep(2)
+
     db = next(get_db())
     if not db.query(Room).filter(Room.name == "global").first():
         db.add(Room(name="global", created_by=1))
