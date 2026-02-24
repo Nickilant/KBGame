@@ -1,65 +1,24 @@
-:root {
-  color-scheme: dark;
-  --bg: #120f1a;
-  --card: #1d1a24;
-  --card-2: #221d2e;
-  --border: #4b3b63;
-  --text: #f8f4ff;
-  --muted: #b8a7d5;
-  --accent: #8f5bff;
-  --accent-2: #4f9cff;
-}
+:root { color-scheme: dark; --bg:#10121a; --card:#1b1f2b; --border:#30384c; --accent:#5b8cff; }
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui;background:var(--bg);color:#eef3ff}
+.app-shell{max-width:980px;margin:0 auto;padding:16px}.topbar{display:flex;justify-content:space-between;align-items:center}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}.tab,button{background:#2a3144;border:1px solid #3a4460;color:#fff;padding:8px 10px;border-radius:9px;cursor:pointer}
+.tab.active{background:var(--accent)} input,textarea{width:100%;background:#111623;color:#fff;border:1px solid #3a4460;padding:8px;border-radius:8px;margin-bottom:8px}
 
-* { box-sizing: border-box; }
-body { margin: 0; font-family: Inter, system-ui, sans-serif; background: radial-gradient(circle at top, #1f1631, var(--bg) 50%); color: var(--text); }
+.feed-wrap{display:grid;gap:12px}.tg-post{max-width:680px}.tg-post.last-read{outline:2px solid #4de29e}
+.post-meta{color:#b7c1db;font-size:13px}.reactions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.actions{display:flex;gap:6px;flex-wrap:wrap}
 
-.app-shell { max-width: 1200px; margin: 0 auto; padding: 16px; }
-.topbar { display: flex; justify-content: space-between; align-items: center; }
-.tabs { display: flex; gap: 8px; }
-.tab { background: #2a2333; border: 1px solid #4f4056; }
-.tab.active { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.chat-layout{display:grid;grid-template-columns:280px 1fr;gap:12px}.room-btn{display:block;width:100%;text-align:left;margin-bottom:8px}.room-global{border-color:#f4c95d}.room-active{outline:2px solid var(--accent)}
+.chat{height:300px;overflow:auto;background:#0f1422;padding:8px;border-radius:8px}
 
-.chat-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
-.room-btn { display:block; width:100%; margin-bottom:8px; text-align:left; }
-.room-global { border: 1px solid #ffd166; }
-.room-active { outline: 2px solid #9f7cff; }
-.stack { margin-top: 12px; }
+.admin-line{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px;border:1px solid #3a4460;border-radius:8px;margin-bottom:6px}
+.admin-actions{display:flex;gap:6px;flex-wrap:wrap}button.danger{background:#ae3159}
 
-.boss-arena .arena-visual { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
-.boss-avatar { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:220px; border:1px dashed #6f4966; border-radius:12px; font-size:64px; }
-.boss-avatar span { font-size: 16px; margin-top: 8px; }
-.players-wrap { display: grid; gap: 8px; }
-.player-chip { background:#2a2333; border:1px solid #4f4056; border-radius:8px; padding:8px; }
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:20px}.modal{width:min(560px,100%)}
+.comments-list{max-height:260px;overflow:auto;background:#111623;border:1px solid #3a4460;border-radius:8px;padding:8px;margin-bottom:8px}
 
-.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.auth-card { width: min(440px, 100%); padding: 24px; background: linear-gradient(160deg, var(--card), var(--card-2)); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45); }
-.auth-eyebrow { margin: 0; color: var(--accent-2); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; font-size: 12px; }
-.auth-card h1 { margin: 10px 0 8px; font-size: 30px; }
-.auth-subtitle { margin: 0 0 16px; color: var(--muted); }
-.auth-form { display: grid; gap: 10px; }
-.auth-alert { margin-bottom: 12px; border-radius: 10px; padding: 10px 12px; font-size: 14px; }
-.auth-error { background: rgba(255, 107, 134, 0.16); border: 1px solid rgba(255, 107, 134, 0.4); color: #ffd8e0; }
-.auth-success { background: rgba(53, 201, 142, 0.16); border: 1px solid rgba(53, 201, 142, 0.4); color: #cbffe9; }
-.auth-switch { width: 100%; margin-top: 12px; background: transparent; border: 1px dashed #6a5598; color: #d4c7f0; }
-
-.card { background: #1d1a24; border: 1px solid #44364f; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-.hp-wrap { width: 100%; height: 24px; background: #2b2233; border: 1px solid #6f4966; }
-.hp { height: 100%; background: linear-gradient(90deg, #ff5733, #ff2d55); }
-.grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
-.item { background: #2a2333; padding: 8px; border: 1px solid #4f4056; min-height: 48px; }
-.chat { height: 360px; overflow: auto; background:#15111c; padding:8px; margin-bottom:8px; }
-button { background: linear-gradient(90deg, var(--accent), var(--accent-2)); color:white; border:0; padding:10px 12px; border-radius: 10px; margin-right:6px; cursor:pointer; font-weight: 600; }
-input { width: 100%; margin-bottom: 8px; background: #100d14; color: white; border:1px solid #4f4056; border-radius: 10px; padding:10px; }
-
-
-.admin-table { display: grid; gap: 8px; }
-.admin-row { display: grid; grid-template-columns: 60px 1fr 120px 2fr; gap: 10px; align-items: center; padding: 8px; border: 1px solid #4f4056; border-radius: 8px; background:#211b2c; }
-.admin-head { font-weight: 700; background:#2a2333; }
-.admin-actions { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
-button.danger { background: linear-gradient(90deg, #bd2f51, #ff3b6f); }
-
-@media (max-width: 960px) {
-  .chat-layout, .boss-arena .arena-visual, .admin-row { grid-template-columns: 1fr; }
-  .topbar { flex-direction: column; gap: 12px; align-items: flex-start; }
-  .tabs { flex-wrap: wrap; }
-}
+.auth-page{min-height:100vh;display:grid;place-items:center}.auth-card{width:min(420px,100%)}
+.auth-alert{padding:8px;border-radius:8px;margin-bottom:8px}.auth-error{background:#60243a}.auth-success{background:#1f5d43}
+.hp-wrap{width:100%;height:20px;background:#222b3d;border:1px solid #3a4460}.hp{height:100%;background:linear-gradient(90deg,#ff684f,#ff2f6c)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.item{background:#222b3d;padding:8px;border:1px solid #3a4460}
+@media (max-width:960px){.chat-layout,.admin-line{grid-template-columns:1fr;display:grid}.topbar{flex-direction:column;align-items:flex-start}}

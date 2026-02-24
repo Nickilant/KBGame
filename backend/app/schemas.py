@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -57,6 +56,15 @@ class PostIn(BaseModel):
     content: str
     image_url: str = ""
     video_url: str = ""
+    audio_url: str = ""
+
+
+class PostCommentIn(BaseModel):
+    content: str
+
+
+class PostReactionIn(BaseModel):
+    emoji: str
 
 
 class RoomIn(BaseModel):

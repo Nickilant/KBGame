@@ -2,7 +2,7 @@ import base64
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket
-from sqlalchemy import func, text
+from sqlalchemy import distinct, func, text
 from sqlalchemy.exc import OperationalError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .auth import create_access_token, hash_password, verify_password
 from .database import Base, engine, get_db
 from .deps import get_current_user, require_roles
-from .models import Boss, Inventory, Item, Message, Post, PostLike, Room, User
+from .models import Boss, Inventory, Item, Message, Post, PostComment, PostLike, PostReaction, PostView, Room, User
 from .raid import boss_auto_attack, get_raid_state, player_attack, start_raid, stop_raid
 from .schemas import (
     AttackOut,
@@ -20,7 +20,9 @@ from .schemas import (
     LootUpdateIn,
     MessageIn,
     PasswordUpdateIn,
+    PostCommentIn,
     PostIn,
+    PostReactionIn,
     RegisterIn,
     RoleUpdateIn,
     RoomIn,
@@ -203,7 +205,7 @@ def delete_message(message_id: int, user: User = Depends(require_roles("master_a
 
 
 @app.post("/api/news")
-def create_post(payload: PostIn, user: User = Depends(require_roles("master_admin", "admin", "boss")), db: Session = Depends(get_db)):
+def create_post(payload: PostIn, user: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
     post = Post(**payload.model_dump(), created_by=user.id)
     db.add(post)
     db.commit()
@@ -211,18 +213,104 @@ def create_post(payload: PostIn, user: User = Depends(require_roles("master_admi
     return post
 
 
-@app.get("/api/news")
-def list_posts(db: Session = Depends(get_db)):
-    likes = db.query(PostLike.post_id, func.count(PostLike.id).label("likes")).group_by(PostLike.post_id).subquery()
+@app.get("/api/news/last-read")
+def last_read_news(user: User = Depends(get_current_user)):
+    return {"last_read_post_id": user.last_read_post_id}
+
+
+@app.post("/api/news/{post_id}/read")
+def mark_read(post_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+
+    exists = db.query(PostView).filter(PostView.post_id == post_id, PostView.user_id == user.id).first()
+    if not exists:
+        db.add(PostView(post_id=post_id, user_id=user.id))
+
+    user.last_read_post_id = post_id
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/news/{post_id}/reactions")
+def react_post(post_id: int, payload: PostReactionIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+
+    reaction = db.query(PostReaction).filter(PostReaction.post_id == post_id, PostReaction.user_id == user.id).first()
+    if reaction:
+        reaction.emoji = payload.emoji
+    else:
+        db.add(PostReaction(post_id=post_id, user_id=user.id, emoji=payload.emoji))
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/news/{post_id}/comments")
+def add_comment(post_id: int, payload: PostCommentIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+    comment = PostComment(post_id=post_id, user_id=user.id, content=payload.content)
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return comment
+
+
+@app.get("/api/news/{post_id}/comments")
+def list_comments(post_id: int, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = (
-        db.query(Post, likes.c.likes)
+        db.query(PostComment, User.username)
+        .join(User, User.id == PostComment.user_id)
+        .filter(PostComment.post_id == post_id)
+        .order_by(PostComment.created_at.asc())
+        .all()
+    )
+    return [{"id": c.id, "content": c.content, "user_id": c.user_id, "username": username, "created_at": c.created_at} for c, username in rows]
+
+
+@app.get("/api/news")
+def list_posts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    likes = db.query(PostLike.post_id, func.count(PostLike.id).label("likes")).group_by(PostLike.post_id).subquery()
+    comments = db.query(PostComment.post_id, func.count(PostComment.id).label("comments")).group_by(PostComment.post_id).subquery()
+    views = db.query(PostView.post_id, func.count(distinct(PostView.user_id)).label("views")).group_by(PostView.post_id).subquery()
+    rows = (
+        db.query(Post, likes.c.likes, comments.c.comments, views.c.views, User.username)
         .join(User, User.id == Post.created_by)
         .outerjoin(likes, likes.c.post_id == Post.id)
+        .outerjoin(comments, comments.c.post_id == Post.id)
+        .outerjoin(views, views.c.post_id == Post.id)
         .filter(User.role == "boss")
         .order_by(Post.created_at.desc())
         .all()
     )
-    return [{"id": p.id, "title": p.title, "content": p.content, "image_url": p.image_url, "video_url": p.video_url, "created_at": p.created_at, "likes": l or 0} for p, l in rows]
+
+    reactions_rows = db.query(PostReaction.post_id, PostReaction.emoji, func.count(PostReaction.id)).group_by(PostReaction.post_id, PostReaction.emoji).all()
+    reactions_map = {}
+    for post_id, emoji, count in reactions_rows:
+        reactions_map.setdefault(post_id, {})[emoji] = count
+
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "content": p.content,
+            "image_url": p.image_url,
+            "video_url": p.video_url,
+            "audio_url": p.audio_url,
+            "author": username,
+            "created_at": p.created_at,
+            "likes": l or 0,
+            "comment_count": c or 0,
+            "views": v or 0,
+            "reactions": reactions_map.get(p.id, {}),
+            "is_last_read": user.last_read_post_id == p.id,
+        }
+        for p, l, c, v, username in rows
+    ]
 
 
 @app.post("/api/news/{post_id}/like")
@@ -293,6 +381,9 @@ def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_
 
     db.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
     db.query(PostLike).filter(PostLike.user_id == user_id).delete(synchronize_session=False)
+    db.query(PostReaction).filter(PostReaction.user_id == user_id).delete(synchronize_session=False)
+    db.query(PostComment).filter(PostComment.user_id == user_id).delete(synchronize_session=False)
+    db.query(PostView).filter(PostView.user_id == user_id).delete(synchronize_session=False)
     db.query(Inventory).filter(Inventory.player_id == user_id).delete(synchronize_session=False)
 
     room_ids = [room.id for room in db.query(Room.id).filter(Room.created_by == user_id).all()]
@@ -300,6 +391,12 @@ def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_
         db.query(Message).filter(Message.room_id.in_(room_ids)).delete(synchronize_session=False)
         db.query(Room).filter(Room.id.in_(room_ids)).delete(synchronize_session=False)
 
+    user_post_ids = [post.id for post in db.query(Post.id).filter(Post.created_by == user_id).all()]
+    if user_post_ids:
+        db.query(PostLike).filter(PostLike.post_id.in_(user_post_ids)).delete(synchronize_session=False)
+        db.query(PostReaction).filter(PostReaction.post_id.in_(user_post_ids)).delete(synchronize_session=False)
+        db.query(PostComment).filter(PostComment.post_id.in_(user_post_ids)).delete(synchronize_session=False)
+        db.query(PostView).filter(PostView.post_id.in_(user_post_ids)).delete(synchronize_session=False)
     db.query(Post).filter(Post.created_by == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
