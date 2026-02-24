@@ -178,18 +178,25 @@ export function App() {
         <main className="feed-page card">
           <section className="posts-scroll-block">
             {posts.map((p) => (
-              <article
-                id={`post-${p.id}`}
+              <div
                 key={p.id}
-                className="tg-post card"
+                className="post-shell"
                 onMouseEnter={() => setHoveredPostId(p.id)}
                 onMouseLeave={() => setHoveredPostId(null)}
-                onClick={() => markRead(p.id)}
               >
-                {p.image_url && <img className="post-image" src={`${api.defaults.baseURL}${p.image_url}`} alt="media" />}
-                {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
-                <p className="post-text">{p.content}</p>
-                <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
+                <article
+                  id={`post-${p.id}`}
+                  className="tg-post card"
+                  onClick={() => markRead(p.id)}
+                >
+                  {p.image_url && <img className="post-image" src={`${api.defaults.baseURL}${p.image_url}`} alt="media" />}
+                  {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
+                  <div className="post-body">
+                    <p className="post-text">{p.content}</p>
+                    <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
+                    <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}>Комментарии {p.comment_count}</button>
+                  </div>
+                </article>
 
                 {hoveredPostId === p.id && (
                   <div className="hover-reactions-vertical">
@@ -197,9 +204,18 @@ export function App() {
                   </div>
                 )}
 
-                <div className="reactions-summary">{Object.entries(p.reactions || {}).map(([emoji, count]) => <button className="reaction-capsule" key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji} {count}</button>)}</div>
-                <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}>Комментарии {p.comment_count}</button>
-              </article>
+                <div className="reactions-summary under-post">
+                  {Object.entries(p.reactions || {}).map(([emoji, count]) => (
+                    <button
+                      className={`reaction-capsule ${p.my_reaction === emoji ? 'mine' : ''}`}
+                      key={emoji}
+                      onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}
+                    >
+                      {emoji} {count}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </section>
 

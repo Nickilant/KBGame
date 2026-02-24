@@ -352,6 +352,9 @@ def list_posts(user: User = Depends(get_current_user), db: Session = Depends(get
     for post_id, emoji, count in reactions_rows:
         reactions_map.setdefault(post_id, {})[emoji] = count
 
+    my_reactions_rows = db.query(PostReaction.post_id, PostReaction.emoji).filter(PostReaction.user_id == user.id).all()
+    my_reactions = {post_id: emoji for post_id, emoji in my_reactions_rows}
+
     return [
         {
             "id": p.id,
@@ -366,6 +369,7 @@ def list_posts(user: User = Depends(get_current_user), db: Session = Depends(get
             "comment_count": c or 0,
             "views": v or 0,
             "reactions": reactions_map.get(p.id, {}),
+            "my_reaction": my_reactions.get(p.id),
             "is_last_read": user.last_read_post_id == p.id,
         }
         for p, l, c, v, username in rows
