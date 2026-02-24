@@ -47,10 +47,15 @@ def init_data():
             time.sleep(2)
 
     db = next(get_db())
+    admin = db.query(User).filter(User.username == "admin").first()
+    if not admin:
+        admin = User(username="admin", password_hash=hash_password("admin123"), role="master_admin")
+        db.add(admin)
+        db.flush()
+
     if not db.query(Room).filter(Room.name == "global").first():
-        db.add(Room(name="global", created_by=1))
-    if not db.query(User).filter(User.username == "admin").first():
-        db.add(User(username="admin", password_hash=hash_password("admin123"), role="master_admin"))
+        db.add(Room(name="global", created_by=admin.id))
+
     if not db.query(Boss).first():
         db.add(Boss(name="Goblin King", hp=2000, max_hp=2000, attack=40, defense=12, abilities=["smash"], is_active=True))
     if not db.query(Item).first():
