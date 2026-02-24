@@ -3,7 +3,7 @@ import os
 import time
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, WebSocket
 from sqlalchemy import distinct, func, text
 from sqlalchemy.exc import OperationalError
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,12 +13,13 @@ from sqlalchemy.orm import Session
 from .auth import create_access_token, hash_password, verify_password
 from .database import Base, engine, get_db
 from .deps import get_current_user, require_roles
-from .models import Boss, Inventory, Item, Message, Post, PostComment, PostLike, PostReaction, PostView, Room, User
+from .models import Boss, Channel, Inventory, Item, Message, Post, PostComment, PostLike, PostReaction, PostView, Room, User
 from .raid import boss_auto_attack, get_raid_state, player_attack, start_raid, stop_raid
 from .schemas import (
     AttackOut,
     BanIn,
     BossIn,
+    ChannelIn,
     LoginIn,
     LootUpdateIn,
     MessageIn,
@@ -47,6 +48,33 @@ def apply_compat_migrations():
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_read_post_id INTEGER"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS audio_url VARCHAR(255) DEFAULT ''"))
+        connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS channel_id INTEGER"))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS channels (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(128) UNIQUE NOT NULL,
+                avatar_url VARCHAR(255) DEFAULT '',
+                created_by INTEGER REFERENCES users(id) NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
+        connection.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.table_constraints
+                    WHERE constraint_name = 'posts_channel_id_fkey'
+                    AND table_name = 'posts'
+                ) THEN
+                    ALTER TABLE posts
+                    ADD CONSTRAINT posts_channel_id_fkey
+                    FOREIGN KEY (channel_id) REFERENCES channels(id);
+                END IF;
+            END$$;
+        """))
 
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS post_reactions (
@@ -108,6 +136,7 @@ def init_data():
 
     if not db.query(Room).filter(Room.name == "global").first():
         db.add(Room(name="global", created_by=admin.id))
+
 
     if not db.query(Boss).first():
         db.add(Boss(name="Goblin King", hp=2000, max_hp=2000, attack=40, defense=12, abilities=["smash"], is_active=True))
@@ -263,13 +292,93 @@ def upload_media(file: UploadFile = File(...), user: User = Depends(require_role
     return {"url": f"/uploads/{filename}", "type": file_type}
 
 
+@app.get("/api/channels")
+def list_channels(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    channels = db.query(Channel).order_by(Channel.created_at.asc()).all()
+
+    unread = dict(
+        db.query(Post.channel_id, func.count(Post.id))
+        .outerjoin(PostView, (PostView.post_id == Post.id) & (PostView.user_id == user.id))
+        .filter(PostView.id.is_(None))
+        .group_by(Post.channel_id)
+        .all()
+    )
+
+    totals = dict(db.query(Post.channel_id, func.count(Post.id)).group_by(Post.channel_id).all())
+
+    return [
+        {
+            "id": channel.id,
+            "name": channel.name,
+            "avatar_url": channel.avatar_url,
+            "post_count": totals.get(channel.id, 0),
+            "unread_count": unread.get(channel.id, 0),
+        }
+        for channel in channels
+    ]
+
+
+@app.post("/api/channels")
+def create_channel(payload: ChannelIn, user: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Channel name is required")
+
+    exists = db.query(Channel).filter(func.lower(Channel.name) == name.lower()).first()
+    if exists:
+        raise HTTPException(400, "Channel already exists")
+
+    channel = Channel(name=name, avatar_url=payload.avatar_url or "", created_by=user.id)
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+    return channel
+
+
+
+
+@app.delete("/api/channels/{channel_id}")
+def delete_channel(channel_id: int, _: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
+    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+
+    post_ids = [post_id for post_id, in db.query(Post.id).filter(Post.channel_id == channel_id).all()]
+    if post_ids:
+        db.query(PostLike).filter(PostLike.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(PostReaction).filter(PostReaction.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(PostComment).filter(PostComment.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(PostView).filter(PostView.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(Post).filter(Post.id.in_(post_ids)).delete(synchronize_session=False)
+
+    db.delete(channel)
+    db.commit()
+    return {"ok": True}
 @app.post("/api/news")
 def create_post(payload: PostIn, user: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
+    if payload.channel_id is not None and not db.query(Channel).filter(Channel.id == payload.channel_id).first():
+        raise HTTPException(404, "Channel not found")
+
     post = Post(**payload.model_dump(), created_by=user.id)
     db.add(post)
     db.commit()
     db.refresh(post)
     return post
+
+
+@app.delete("/api/news/{post_id}")
+def delete_post(post_id: int, _: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(404, "Post not found")
+
+    db.query(PostLike).filter(PostLike.post_id == post_id).delete()
+    db.query(PostReaction).filter(PostReaction.post_id == post_id).delete()
+    db.query(PostComment).filter(PostComment.post_id == post_id).delete()
+    db.query(PostView).filter(PostView.post_id == post_id).delete()
+    db.delete(post)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/api/news/last-read")
@@ -332,20 +441,22 @@ def list_comments(post_id: int, _: User = Depends(get_current_user), db: Session
 
 
 @app.get("/api/news")
-def list_posts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_posts(channel_id: int | None = Query(default=None), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     likes = db.query(PostLike.post_id, func.count(PostLike.id).label("likes")).group_by(PostLike.post_id).subquery()
     comments = db.query(PostComment.post_id, func.count(PostComment.id).label("comments")).group_by(PostComment.post_id).subquery()
     views = db.query(PostView.post_id, func.count(distinct(PostView.user_id)).label("views")).group_by(PostView.post_id).subquery()
-    rows = (
+    base_query = (
         db.query(Post, likes.c.likes, comments.c.comments, views.c.views, User.username)
         .join(User, User.id == Post.created_by)
         .outerjoin(likes, likes.c.post_id == Post.id)
         .outerjoin(comments, comments.c.post_id == Post.id)
         .outerjoin(views, views.c.post_id == Post.id)
         .filter(User.role == "boss")
-        .order_by(Post.created_at.desc())
-        .all()
     )
+    if channel_id is not None:
+        base_query = base_query.filter(Post.channel_id == channel_id)
+
+    rows = base_query.order_by(Post.created_at.desc()).all()
 
     reactions_rows = db.query(PostReaction.post_id, PostReaction.emoji, func.count(PostReaction.id)).group_by(PostReaction.post_id, PostReaction.emoji).all()
     reactions_map = {}
@@ -363,6 +474,7 @@ def list_posts(user: User = Depends(get_current_user), db: Session = Depends(get
             "image_url": p.image_url,
             "video_url": p.video_url,
             "audio_url": p.audio_url,
+            "channel_id": p.channel_id,
             "author": username,
             "created_at": p.created_at,
             "likes": l or 0,

@@ -57,6 +57,7 @@ class PostIn(BaseModel):
     image_url: str = ""
     video_url: str = ""
     audio_url: str = ""
+    channel_id: int | None = None
 
 
 class PostCommentIn(BaseModel):
@@ -93,3 +94,8 @@ class LootUpdateIn(BaseModel):
 
 class PasswordUpdateIn(BaseModel):
     password: str
+
+
+class ChannelIn(BaseModel):
+    name: str
+    avatar_url: str = ""

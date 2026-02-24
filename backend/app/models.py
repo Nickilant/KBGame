@@ -83,7 +83,18 @@ class Post(Base):
     image_url = Column(String(255), default="")
     video_url = Column(String(255), default="")
     audio_url = Column(String(255), default="")
+    channel_id = Column(Integer, ForeignKey("channels.id"), nullable=True, index=True)
     created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Channel(Base):
+    __tablename__ = "channels"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), unique=True, nullable=False, index=True)
+    avatar_url = Column(String(255), default="")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
