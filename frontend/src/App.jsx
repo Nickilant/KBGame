@@ -1,87 +1,274 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000' })
+const ALL_REACTIONS = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😍','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤗','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌']
 
 export function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '')
+  const [authMode, setAuthMode] = useState('login')
+  const [authError, setAuthError] = useState('')
+
+  const [activeTab, setActiveTab] = useState('feed')
   const [me, setMe] = useState(null)
-  const [raid, setRaid] = useState({ active: false })
+  const [posts, setPosts] = useState([])
+  const [newPostText, setNewPostText] = useState('')
+  const [postMedia, setPostMedia] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [hoveredPostId, setHoveredPostId] = useState(null)
+  const fileInputRef = useRef(null)
+
+  const [rooms, setRooms] = useState([])
+  const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
-  const [rooms, setRooms] = useState([])
-  const [posts, setPosts] = useState([])
-  const [inventory, setInventory] = useState([])
-  const [users, setUsers] = useState([])
+
+  const [commentModalPost, setCommentModalPost] = useState(null)
+  const [comments, setComments] = useState([])
+  const [commentDraft, setCommentDraft] = useState('')
+  const [showCommentEmoji, setShowCommentEmoji] = useState(false)
+  const commentsRef = useRef(null)
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
+  const isBoss = me?.role === 'boss'
+
+  const loadFeed = async () => {
+    const [feedResp, lastReadResp] = await Promise.all([
+      api.get('/api/news', { headers }),
+      api.get('/api/news/last-read', { headers }),
+    ])
+    const asc = [...feedResp.data].reverse()
+    setPosts(asc)
+    if (lastReadResp.data.last_read_post_id) {
+      setTimeout(() => document.getElementById(`post-${lastReadResp.data.last_read_post_id}`)?.scrollIntoView({ block: 'center' }), 150)
+    }
+  }
+
+  const loadBase = async () => {
+    const meResp = await api.get('/api/me', { headers })
+    setMe(meResp.data)
+    await loadFeed()
+    const { data: roomData } = await api.get('/api/rooms')
+    setRooms(roomData)
+    if (roomData.length) setSelectedRoomId((roomData.find((r) => r.name === 'global') || roomData[0]).id)
+  }
 
   useEffect(() => {
     if (!token) return
     localStorage.setItem('token', token)
-    api.get('/api/me', { headers }).then((r) => setMe(r.data))
-    api.get('/api/raid/state').then((r) => setRaid(r.data))
-    api.get('/api/news').then((r) => setPosts(r.data))
-    api.get('/api/rooms').then((r) => setRooms(r.data))
-    api.get('/api/inventory', { headers }).then((r) => setInventory(r.data))
-    api.get('/api/chat/messages/1').then((r) => setChat(r.data))
-    if (me?.role === 'master_admin') {
-      api.get('/api/master-admin/users', { headers }).then((r) => setUsers(r.data))
-    }
+    loadBase()
   }, [token])
 
   useEffect(() => {
-    const ws = new WebSocket((import.meta.env.VITE_WS_URL || 'ws://localhost:8000') + '/ws/global')
-    ws.onmessage = (e) => setChat((prev) => [...prev, JSON.parse(e.data)])
-    return () => ws.close()
-  }, [])
+    if (!token || !selectedRoomId) return
+    api.get(`/api/chat/messages/${selectedRoomId}`).then((r) => setChat(r.data))
+  }, [token, selectedRoomId])
 
   const login = async (e) => {
     e.preventDefault()
     const f = new FormData(e.target)
-    const { data } = await api.post('/api/auth/login', { username: f.get('username'), password: f.get('password') })
-    setToken(data.access_token)
+    setAuthError('')
+    try {
+      const { data } = await api.post('/api/auth/login', { username: f.get('username'), password: f.get('password') })
+      setToken(data.access_token)
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || 'Ошибка входа')
+    }
   }
 
-  const attack = async () => {
-    await api.post('/api/raid/attack', {}, { headers })
-    const { data } = await api.get('/api/raid/state')
-    setRaid(data)
+  const register = async (e) => {
+    e.preventDefault()
+    const f = new FormData(e.target)
+    const pass = (f.get('password') || '').toString()
+    const repass = (f.get('confirmPassword') || '').toString()
+    setAuthError('')
+    if (pass !== repass) return setAuthError('Пароли не совпадают')
+    try {
+      await api.post('/api/auth/register', { username: f.get('username'), password: pass })
+      setAuthMode('login')
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || 'Ошибка регистрации')
+    }
+  }
+
+  const uploadMedia = async (file) => {
+    setUploading(true)
+    try {
+      const body = new FormData()
+      body.append('file', file)
+      const { data } = await api.post('/api/uploads/media', body, { headers: { ...headers, 'Content-Type': 'multipart/form-data' } })
+      setPostMedia(data)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const createPost = async (e) => {
+    e.preventDefault()
+    if (!newPostText.trim() && !postMedia) return
+    await api.post('/api/news', {
+      title: newPostText.slice(0, 60) || 'Новый пост',
+      content: newPostText || ' ',
+      image_url: postMedia?.type === 'image' ? postMedia.url : '',
+      video_url: postMedia?.type === 'video' ? postMedia.url : '',
+      audio_url: ''
+    }, { headers })
+    setNewPostText('')
+    setPostMedia(null)
+    await loadFeed()
+  }
+
+  const react = async (id, emoji) => { await api.post(`/api/news/${id}/reactions`, { emoji }, { headers }); await loadFeed() }
+  const markRead = async (id) => { await api.post(`/api/news/${id}/read`, {}, { headers }) }
+
+  const openComments = async (post) => {
+    setCommentModalPost(post)
+    const { data } = await api.get(`/api/news/${post.id}/comments`, { headers })
+    setComments(data)
+    setCommentDraft('')
+    setShowCommentEmoji(false)
+    setTimeout(() => commentsRef.current?.scrollTo({ top: 0 }), 0)
+  }
+  const sendComment = async () => {
+    if (!commentModalPost || !commentDraft.trim()) return
+    await api.post(`/api/news/${commentModalPost.id}/comments`, { content: commentDraft }, { headers })
+    const { data } = await api.get(`/api/news/${commentModalPost.id}/comments`, { headers })
+    setComments(data)
+    setCommentDraft('')
   }
 
   const sendMessage = async () => {
-    const { data } = await api.post('/api/chat/messages', { room_id: 1, content: message }, { headers })
-    setMessage('')
+    if (!selectedRoomId || !message.trim()) return
+    const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message }, { headers })
     setChat((prev) => [...prev, data])
+    setMessage('')
   }
 
   if (!token) {
-    return <form className="card" onSubmit={login}><h1>KB Raid Login</h1><input name="username" placeholder="username"/><input name="password" placeholder="password" type="password"/><button>Login</button></form>
+    return (
+      <div className="auth-page">
+        <form className="auth-card card" onSubmit={authMode === 'login' ? login : register}>
+          <h1>{authMode === 'login' ? 'Вход' : 'Регистрация'}</h1>
+          {authError && <div className="auth-error">{authError}</div>}
+          <input name="username" placeholder="Логин" required />
+          <input name="password" placeholder="Пароль" type="password" required />
+          {authMode === 'register' && <input name="confirmPassword" placeholder="Повторите пароль" type="password" required />}
+          <button>{authMode === 'login' ? 'Войти' : 'Зарегистрироваться'}</button>
+          <button type="button" className="link-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+            {authMode === 'login' ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Вход'}
+          </button>
+        </form>
+      </div>
+    )
   }
 
   return (
-    <div className="layout">
-      <main>
-        <h1>Boss Raid Arena</h1>
-        <div className="card">
-          <h2>{raid.boss_name || 'No active raid'}</h2>
-          <div className="hp-wrap"><div className="hp" style={{ width: `${raid.boss_hp ? (raid.boss_hp / 2000) * 100 : 0}%` }} /></div>
-          <p>HP: {raid.boss_hp ?? '-'}</p>
-          <button onClick={attack}>Attack (3s CD)</button>
-          {(me?.role === 'boss' || me?.role === 'master_admin') && <button onClick={() => api.post('/api/raid/start', {}, { headers })}>Start Raid</button>}
+    <div className="app-shell">
+      <header className="topbar card">
+        <h1>KB Raid Arena</h1>
+        <nav className="tabs">
+          <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
+          <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
+          <button onClick={() => setActiveTab('profile')} className={activeTab === 'profile' ? 'tab active' : 'tab'}>Профиль</button>
+          <button onClick={() => setActiveTab('boss')} className={activeTab === 'boss' ? 'tab active' : 'tab'}>БоссБатл</button>
+        </nav>
+      </header>
+
+      {activeTab === 'feed' && (
+        <main className="feed-page card">
+          <section className="posts-scroll-block">
+            {posts.map((p) => (
+              <div
+                key={p.id}
+                className="post-shell"
+                onMouseEnter={() => setHoveredPostId(p.id)}
+                onMouseLeave={() => setHoveredPostId(null)}
+              >
+                <article
+                  id={`post-${p.id}`}
+                  className="tg-post card"
+                  onClick={() => markRead(p.id)}
+                >
+                  {p.image_url && <img className="post-image" src={`${api.defaults.baseURL}${p.image_url}`} alt="media" />}
+                  {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
+                  <div className="post-body">
+                    <p className="post-text">{p.content}</p>
+                    <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
+                    <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}><span>{p.comment_count > 0 ? `Комментариев ${p.comment_count}` : "Прокоментировать"}</span><span className="row-arrow">›</span></button>
+                  </div>
+                </article>
+
+                {hoveredPostId === p.id && (
+                  <div className="hover-reactions-vertical">
+                    {ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji}</button>)}
+                  </div>
+                )}
+
+                <div className="reactions-summary under-post">
+                  {Object.entries(p.reactions || {}).map(([emoji, count]) => (
+                    <button
+                      className={`reaction-capsule ${p.my_reaction === emoji ? 'mine' : ''}`}
+                      key={emoji}
+                      onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}
+                    >
+                      {emoji} {count}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+
+          {isBoss && (
+            <form className="post-input-wrap" onSubmit={createPost}>
+              {postMedia && <div className="composer-preview">{postMedia.type === "image" ? <img src={`${api.defaults.baseURL}${postMedia.url}`} alt="preview" /> : <video controls src={`${api.defaults.baseURL}${postMedia.url}`} />}</div>}
+              <div className="post-input-row">
+                <button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button>
+                <span className="input-v-sep" aria-hidden="true">|</span>
+                <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,video/*" onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
+                <input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" />
+                <button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button>
+              </div>
+            </form>
+          )}
+        </main>
+      )}
+
+      {activeTab === 'chat' && (
+        <main className="chat-page card">
+          <h2>Чат</h2>
+          <div className="chat-rooms">{rooms.map((r) => <button key={r.id} className={selectedRoomId === r.id ? 'tab active' : 'tab'} onClick={() => setSelectedRoomId(r.id)}>{r.name}</button>)}</div>
+          <div className="chat-box">{chat.map((m, i) => <div key={m.id || i}>{m.content}</div>)}</div>
+          <div className="chat-input"><input value={message} onChange={(e) => setMessage(e.target.value)} /><button onClick={sendMessage}>Отправить</button></div>
+        </main>
+      )}
+
+      {activeTab === 'profile' && <main className="card"><h2>Профиль</h2><p>{me.username} ({me.role})</p></main>}
+      {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
+
+      {commentModalPost && (
+        <div className="modal-backdrop">
+          <div className="modal card">
+            <div className="comments-header">
+              <button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button>
+              <span className="header-sep">|</span>
+              <h3>Комментарии</h3>
+            </div>
+            <div className="comments-list fixed" ref={commentsRef}>
+              {comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}
+              <button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button>
+            </div>
+            <div className="comment-input-wrap">
+              <input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" />
+              <div className="comment-actions-right">
+                <button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button>
+                <button className="send-inline" onClick={sendComment}>›</button>
+                {showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="card"><h2>Top Damage</h2>{raid.leaderboard && Object.entries(raid.leaderboard).map(([k,v])=><div key={k}>#{k}: {v}</div>)}</div>
-        <div className="card"><h2>Inventory</h2><div className="grid">{inventory.map((i)=><div key={i.id} className="item">{i.name}<small>{i.rarity}</small></div>)}</div></div>
-        <div className="card"><h2>News</h2>{posts.map((p)=><article key={p.id}><h3>{p.title}</h3><p>{p.content}</p><small>❤ {p.likes}</small></article>)}</div>
-        {me?.role === 'master_admin' && <div className="card"><h2>/master-admin panel</h2>{users.map((u)=><div key={u.id}>{u.username} - {u.role} - banned:{String(u.is_banned)}</div>)}</div>}
-      </main>
-      <aside className="card">
-        <h2>Chat</h2>
-        <div className="chat">{chat.map((m,idx)=><div key={m.id||idx}>{m.content || m.message}</div>)}</div>
-        <input value={message} onChange={(e)=>setMessage(e.target.value)} placeholder="say something" />
-        <button onClick={sendMessage}>Send</button>
-        <p>Rooms: {rooms.map((r)=>r.name).join(', ')}</p>
-      </aside>
+      )}
     </div>
   )
 }
