@@ -147,6 +147,15 @@ export function App() {
     await loadChannels()
   }
 
+  const deleteChannel = async (channelId) => {
+    await api.delete(`/api/channels/${channelId}`, { headers })
+    await loadChannels()
+    if (selectedChannelId === channelId) {
+      setSelectedChannelId(null)
+      setPosts([])
+    }
+  }
+
   const react = async (id, emoji) => {
     await api.post(`/api/news/${id}/reactions`, { emoji }, { headers })
     await Promise.all([loadFeed(false), loadChannels()])
@@ -206,7 +215,7 @@ export function App() {
         <main className="feed-page card">
           <aside className="channels-sidebar">
             <div className="channels-header">Каналы {isBoss && <><span>|</span><button onClick={() => setShowChannelModal(true)} className="add-channel-btn">+</button></>}</div>
-            <div className="channels-list">{channels.length === 0 ? <div className="channels-empty">Каналов пока нет</div> : channels.map((c) => <button key={c.id} className={`channel-item ${selectedChannelId === c.id ? 'active' : ''}`} onClick={() => setSelectedChannelId(c.id)}><img src={c.avatar_url ? `${api.defaults.baseURL}${c.avatar_url}` : 'https://placehold.co/40x40/1f2433/ffffff?text=%23'} alt={c.name} /><div className="channel-main"><span>{c.name}</span>{c.unread_count > 0 && <small>{c.unread_count}</small>}</div></button>)}</div>
+            <div className="channels-list">{channels.length === 0 ? <div className="channels-empty">Каналов пока нет</div> : channels.map((c) => <button key={c.id} className={`channel-item ${selectedChannelId === c.id ? 'active' : ''}`} onClick={() => setSelectedChannelId(c.id)}><img src={c.avatar_url ? `${api.defaults.baseURL}${c.avatar_url}` : 'https://placehold.co/40x40/1f2433/ffffff?text=%23'} alt={c.name} /><div className="channel-main"><span>{c.name}</span>{c.unread_count > 0 && <small>{c.unread_count}</small>}</div>{isBoss && <span className="channel-actions"><span className="channel-v-sep">|</span><span className="delete-channel-btn" onClick={(e) => { e.stopPropagation(); deleteChannel(c.id) }} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); deleteChannel(c.id) } }}>✕</span></span>}</button>)}</div>
           </aside>
 
           <section className="posts-column">

@@ -335,6 +335,25 @@ def create_channel(payload: ChannelIn, user: User = Depends(require_roles("boss"
     return channel
 
 
+
+
+@app.delete("/api/channels/{channel_id}")
+def delete_channel(channel_id: int, _: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
+    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+
+    post_ids = [post_id for post_id, in db.query(Post.id).filter(Post.channel_id == channel_id).all()]
+    if post_ids:
+        db.query(PostLike).filter(PostLike.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(PostReaction).filter(PostReaction.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(PostComment).filter(PostComment.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(PostView).filter(PostView.post_id.in_(post_ids)).delete(synchronize_session=False)
+        db.query(Post).filter(Post.id.in_(post_ids)).delete(synchronize_session=False)
+
+    db.delete(channel)
+    db.commit()
+    return {"ok": True}
 @app.post("/api/news")
 def create_post(payload: PostIn, user: User = Depends(require_roles("boss")), db: Session = Depends(get_db)):
     if payload.channel_id is not None and not db.query(Channel).filter(Channel.id == payload.channel_id).first():

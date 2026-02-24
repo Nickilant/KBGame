@@ -10,7 +10,7 @@
 .channels-sidebar{border:1px solid #3a4460;background:#121726;overflow:hidden;display:flex;flex-direction:column}
 .channels-header{padding:12px;border-bottom:1px solid #3a4460;display:flex;align-items:center;gap:8px;font-weight:700}.add-channel-btn{padding:2px 8px}
 .channels-list{overflow:auto}.channels-empty{padding:12px;color:#aab4d2}.channel-item{width:100%;border:0;border-bottom:1px solid #3a4460;border-radius:0;background:transparent;display:flex;align-items:center;gap:10px;padding:10px;text-align:left}.channel-item.active{background:#2f3850}.channel-item img{width:40px;height:40px;border-radius:999px;object-fit:cover}
-.channel-main{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%}.channel-main small{background:#3e4a6a;padding:2px 7px;border-radius:999px}
+.channel-main{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%}.channel-main small{background:#3e4a6a;padding:2px 7px;border-radius:999px}.channel-actions{display:flex;align-items:center;gap:6px;margin-left:8px}.channel-v-sep{opacity:.65}.delete-channel-btn{color:#ff9cae;cursor:pointer;user-select:none}
 
 .posts-column{display:flex;flex-direction:column;min-height:0}
 .posts-scroll-block{flex:1;overflow:auto;border:1px solid #3a4460;border-bottom:0;border-radius:0;padding:10px;background:#121726}
