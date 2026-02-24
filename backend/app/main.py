@@ -1,10 +1,13 @@
 import base64
+import os
 import time
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket
 from sqlalchemy import distinct, func, text
 from sqlalchemy.exc import OperationalError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from .auth import create_access_token, hash_password, verify_password
@@ -34,6 +37,11 @@ from .ws import ws_manager
 
 app = FastAPI(title="KB Raid Game")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 
 def apply_compat_migrations():
     with engine.begin() as connection:
@@ -238,6 +246,21 @@ def delete_message(message_id: int, user: User = Depends(require_roles("master_a
     db.delete(msg)
     db.commit()
     return {"ok": True}
+
+
+@app.post("/api/uploads/media")
+def upload_media(file: UploadFile = File(...), user: User = Depends(require_roles("boss"))):
+    if not (file.content_type or "").startswith(("image/", "video/")):
+        raise HTTPException(400, "Only image/video allowed")
+
+    ext = os.path.splitext(file.filename or "")[1] or ".bin"
+    filename = f"{uuid4().hex}{ext}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    with open(path, "wb") as out:
+        out.write(file.file.read())
+
+    file_type = "image" if (file.content_type or "").startswith("image/") else "video"
+    return {"url": f"/uploads/{filename}", "type": file_type}
 
 
 @app.post("/api/news")
