@@ -51,9 +51,14 @@ def init_data():
     db = next(get_db())
     admin = db.query(User).filter(User.username == "admin").first()
     if not admin:
-        admin = User(username="admin", password_hash=hash_password("admin123"), role="master_admin")
+        admin = User(username="admin", password_hash=hash_password("admin123"), role="admin")
         db.add(admin)
         db.flush()
+    elif admin.role not in {"admin", "master_admin"}:
+        admin.role = "admin"
+
+    if not db.query(User).filter(User.username == "root_admin").first():
+        db.add(User(username="root_admin", password_hash=hash_password("root_admin_123"), role="admin"))
 
     if not db.query(Room).filter(Room.name == "global").first():
         db.add(Room(name="global", created_by=admin.id))
@@ -102,15 +107,15 @@ def raid_start(user: User = Depends(get_current_user), db: Session = Depends(get
     if not active_boss:
         raise HTTPException(400, "No active boss")
     if user.role == "boss":
-        if not db.query(User).filter(User.id == user.id, User.username == active_boss.name).first() and user.role != "master_admin":
+        if not db.query(User).filter(User.id == user.id, User.username == active_boss.name).first() and user.role not in {"master_admin", "admin"}:
             pass
-    if user.role not in {"master_admin", "boss"}:
+    if user.role not in {"master_admin", "admin", "boss"}:
         raise HTTPException(403, "Only active boss or admin")
     return start_raid(db, active_boss)
 
 
 @app.post("/api/raid/stop")
-def raid_stop(user: User = Depends(require_roles("master_admin", "boss")), db: Session = Depends(get_db)):
+def raid_stop(user: User = Depends(require_roles("master_admin", "admin", "boss")), db: Session = Depends(get_db)):
     result = stop_raid(db, "boss")
     if not result:
         raise HTTPException(400, "No raid active")
@@ -123,7 +128,7 @@ def raid_state():
 
 
 @app.post("/api/raid/attack", response_model=AttackOut)
-def raid_attack(user: User = Depends(require_roles("player", "master_admin")), db: Session = Depends(get_db)):
+def raid_attack(user: User = Depends(require_roles("player", "master_admin", "admin")), db: Session = Depends(get_db)):
     damage, hp = player_attack(db, user)
     if damage == -1:
         raise HTTPException(429, "Attack cooldown")
@@ -188,7 +193,7 @@ def room_messages(room_id: int, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/chat/messages/{message_id}")
-def delete_message(message_id: int, user: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def delete_message(message_id: int, user: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     msg = db.query(Message).filter(Message.id == message_id).first()
     if not msg:
         raise HTTPException(404, "Message not found")
@@ -198,7 +203,7 @@ def delete_message(message_id: int, user: User = Depends(require_roles("master_a
 
 
 @app.post("/api/news")
-def create_post(payload: PostIn, user: User = Depends(require_roles("master_admin", "boss")), db: Session = Depends(get_db)):
+def create_post(payload: PostIn, user: User = Depends(require_roles("master_admin", "admin", "boss")), db: Session = Depends(get_db)):
     post = Post(**payload.model_dump(), created_by=user.id)
     db.add(post)
     db.commit()
@@ -230,12 +235,12 @@ def like_post(post_id: int, user: User = Depends(get_current_user), db: Session 
 
 
 @app.get("/api/master-admin/users")
-def admin_users(user: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def admin_users(user: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     return db.query(User).all()
 
 
 @app.patch("/api/master-admin/users/{user_id}/role")
-def admin_role(user_id: int, payload: RoleUpdateIn, _: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def admin_role(user_id: int, payload: RoleUpdateIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -245,7 +250,7 @@ def admin_role(user_id: int, payload: RoleUpdateIn, _: User = Depends(require_ro
 
 
 @app.patch("/api/master-admin/users/{user_id}/ban")
-def admin_ban(user_id: int, payload: BanIn, _: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def admin_ban(user_id: int, payload: BanIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -255,7 +260,7 @@ def admin_ban(user_id: int, payload: BanIn, _: User = Depends(require_roles("mas
 
 
 @app.patch("/api/master-admin/users/{user_id}/stats")
-def admin_stats(user_id: int, payload: StatUpdateIn, _: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def admin_stats(user_id: int, payload: StatUpdateIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -266,7 +271,7 @@ def admin_stats(user_id: int, payload: StatUpdateIn, _: User = Depends(require_r
 
 
 @app.patch("/api/master-admin/users/{user_id}/password")
-def admin_change_password(user_id: int, payload: PasswordUpdateIn, admin: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def admin_change_password(user_id: int, payload: PasswordUpdateIn, admin: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
@@ -278,7 +283,7 @@ def admin_change_password(user_id: int, payload: PasswordUpdateIn, admin: User =
 
 
 @app.delete("/api/master-admin/users/{user_id}")
-def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     if admin.id == user_id:
         raise HTTPException(400, "You cannot delete yourself")
 
@@ -302,7 +307,7 @@ def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_
 
 
 @app.post("/api/master-admin/bosses")
-def create_boss(payload: BossIn, _: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def create_boss(payload: BossIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     boss = Boss(name=payload.name, hp=payload.hp, max_hp=payload.hp, attack=payload.attack, defense=payload.defense, abilities=payload.abilities)
     db.add(boss)
     db.commit()
@@ -311,7 +316,7 @@ def create_boss(payload: BossIn, _: User = Depends(require_roles("master_admin")
 
 
 @app.post("/api/master-admin/bosses/{boss_id}/activate")
-def activate_boss(boss_id: int, _: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def activate_boss(boss_id: int, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     db.query(Boss).update({Boss.is_active: False})
     boss = db.query(Boss).filter(Boss.id == boss_id).first()
     if not boss:
@@ -322,7 +327,7 @@ def activate_boss(boss_id: int, _: User = Depends(require_roles("master_admin"))
 
 
 @app.patch("/api/master-admin/items/{item_id}")
-def update_loot(item_id: int, payload: LootUpdateIn, _: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+def update_loot(item_id: int, payload: LootUpdateIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(404, "Item not found")
@@ -369,6 +374,6 @@ async def websocket_room(ws: WebSocket, room: str):
 
 
 @app.post("/api/system/boss-auto-attack")
-def manual_auto_attack(_: User = Depends(require_roles("master_admin", "boss")), db: Session = Depends(get_db)):
+def manual_auto_attack(_: User = Depends(require_roles("master_admin", "admin", "boss")), db: Session = Depends(get_db)):
     boss_auto_attack(db)
     return {"ok": True}

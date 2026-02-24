@@ -26,6 +26,7 @@ export function App() {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId)
+  const isAdmin = me?.role === 'master_admin' || me?.role === 'admin'
 
   const loadRooms = async () => {
     const { data } = await api.get('/api/rooms')
@@ -54,7 +55,7 @@ export function App() {
       loadRooms(),
     ])
 
-    if (meResp.data.role === 'master_admin') {
+    if (['master_admin', 'admin'].includes(meResp.data.role)) {
       setActiveTab('admin')
       await loadUsers()
     }
@@ -228,7 +229,7 @@ export function App() {
       <header className="topbar card">
         <h1>KB Raid Arena</h1>
         <nav className="tabs">
-          {me?.role === 'master_admin' && <button onClick={() => setActiveTab('admin')} className={activeTab === 'admin' ? 'tab active' : 'tab'}>Админка</button>}
+          {isAdmin && <button onClick={() => setActiveTab('admin')} className={activeTab === 'admin' ? 'tab active' : 'tab'}>Админка</button>}
           <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
           <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
           <button onClick={() => setActiveTab('profile')} className={activeTab === 'profile' ? 'tab active' : 'tab'}>Профиль</button>
@@ -236,7 +237,7 @@ export function App() {
         </nav>
       </header>
 
-      {activeTab === 'admin' && me?.role === 'master_admin' && (
+      {activeTab === 'admin' && isAdmin && (
         <main className="card">
           <h2>Панель администратора</h2>
           <p>Управление пользователями системы.</p>
@@ -334,7 +335,7 @@ export function App() {
           <div className="hp-wrap"><div className="hp" style={{ width: `${raid.boss_hp ? (raid.boss_hp / 2000) * 100 : 0}%` }} /></div>
           <p>HP: {raid.boss_hp ?? '-'}</p>
           <button onClick={attack}>Attack (3s CD)</button>
-          {(me?.role === 'boss' || me?.role === 'master_admin') && <button onClick={() => api.post('/api/raid/start', {}, { headers })}>Start Raid</button>}
+          {(me?.role === 'boss' || isAdmin) && <button onClick={() => api.post('/api/raid/start', {}, { headers })}>Start Raid</button>}
         </main>
       )}
     </div>
