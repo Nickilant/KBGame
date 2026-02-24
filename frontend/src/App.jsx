@@ -257,8 +257,8 @@ export function App() {
             <div className="comment-input-wrap">
               <input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" />
               <div className="comment-actions-right">
-                <button className="send-inline" onClick={sendComment}>›</button>
                 <button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button>
+                <button className="send-inline" onClick={sendComment}>›</button>
                 {showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}
               </div>
             </div>
