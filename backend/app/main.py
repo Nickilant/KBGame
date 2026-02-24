@@ -35,6 +35,41 @@ from .ws import ws_manager
 app = FastAPI(title="KB Raid Game")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+def apply_compat_migrations():
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_read_post_id INTEGER"))
+        connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS audio_url VARCHAR(255) DEFAULT ''"))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS post_reactions (
+                id SERIAL PRIMARY KEY,
+                post_id INTEGER REFERENCES posts(id),
+                user_id INTEGER REFERENCES users(id),
+                emoji VARCHAR(16) NOT NULL,
+                CONSTRAINT uq_post_reaction_user UNIQUE (post_id, user_id)
+            )
+        """))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS post_comments (
+                id SERIAL PRIMARY KEY,
+                post_id INTEGER REFERENCES posts(id),
+                user_id INTEGER REFERENCES users(id),
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS post_views (
+                id SERIAL PRIMARY KEY,
+                post_id INTEGER REFERENCES posts(id),
+                user_id INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT NOW(),
+                CONSTRAINT uq_post_view_user UNIQUE (post_id, user_id)
+            )
+        """))
+
 
 @app.on_event("startup")
 def init_data():
@@ -44,6 +79,7 @@ def init_data():
             with engine.begin() as connection:
                 connection.execute(text("SELECT 1"))
             Base.metadata.create_all(bind=engine)
+            apply_compat_migrations()
             break
         except OperationalError:
             if attempt == max_retries:
