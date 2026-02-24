@@ -248,8 +248,11 @@ export function App() {
       {commentModalPost && (
         <div className="modal-backdrop">
           <div className="modal card">
-            <button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button>
-            <h3>Комментарии</h3>
+            <div className="comments-header">
+              <button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button>
+              <span className="header-sep">|</span>
+              <h3>Комментарии</h3>
+            </div>
             <div className="comments-list fixed" ref={commentsRef}>
               {comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}
               <button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button>
