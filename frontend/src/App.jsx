@@ -189,26 +189,29 @@ export function App() {
                 {p.image_url && <img className="post-image" src={`${api.defaults.baseURL}${p.image_url}`} alt="media" />}
                 {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
                 <p className="post-text">{p.content}</p>
-                <div className="post-meta">👀 {p.views} · 💬 {p.comment_count}</div>
+                <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
 
                 {hoveredPostId === p.id && (
-                  <div className="hover-reactions-strip">
+                  <div className="hover-reactions-vertical">
                     {ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji}</button>)}
                   </div>
                 )}
 
-                <div className="reactions-summary">{Object.entries(p.reactions || {}).map(([emoji, count]) => <span key={emoji}>{emoji} {count}</span>)}</div>
-                <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}>Комментарии</button>
+                <div className="reactions-summary">{Object.entries(p.reactions || {}).map(([emoji, count]) => <button className="reaction-capsule" key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji} {count}</button>)}</div>
+                <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}>Комментарии {p.comment_count}</button>
               </article>
             ))}
           </section>
 
           {isBoss && (
-            <form className="post-input-row" onSubmit={createPost}>
-              <button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button>
-              <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,video/*" onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
-              <input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" />
-              <button type="submit" disabled={uploading}>{uploading ? 'Загрузка…' : 'Отправить'}</button>
+            <form className="post-input-wrap" onSubmit={createPost}>
+              {postMedia && <div className="composer-preview">{postMedia.type === "image" ? <img src={`${api.defaults.baseURL}${postMedia.url}`} alt="preview" /> : <video controls src={`${api.defaults.baseURL}${postMedia.url}`} />}</div>}
+              <div className="post-input-row">
+                <button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button>
+                <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,video/*" onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
+                <input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" />
+                <button type="submit" disabled={uploading}>{uploading ? 'Загрузка…' : 'Отправить'}</button>
+              </div>
             </form>
           )}
         </main>
