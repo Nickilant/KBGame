@@ -19,6 +19,7 @@ from .schemas import (
     LoginIn,
     LootUpdateIn,
     MessageIn,
+    PasswordUpdateIn,
     PostIn,
     RegisterIn,
     RoleUpdateIn,
@@ -262,6 +263,42 @@ def admin_stats(user_id: int, payload: StatUpdateIn, _: User = Depends(require_r
         setattr(user, key, value)
     db.commit()
     return user
+
+
+@app.patch("/api/master-admin/users/{user_id}/password")
+def admin_change_password(user_id: int, payload: PasswordUpdateIn, admin: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    if len(payload.password) < 6:
+        raise HTTPException(400, "Password too short")
+    user.password_hash = hash_password(payload.password)
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/master-admin/users/{user_id}")
+def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_admin")), db: Session = Depends(get_db)):
+    if admin.id == user_id:
+        raise HTTPException(400, "You cannot delete yourself")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    db.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
+    db.query(PostLike).filter(PostLike.user_id == user_id).delete(synchronize_session=False)
+    db.query(Inventory).filter(Inventory.player_id == user_id).delete(synchronize_session=False)
+
+    room_ids = [room.id for room in db.query(Room.id).filter(Room.created_by == user_id).all()]
+    if room_ids:
+        db.query(Message).filter(Message.room_id.in_(room_ids)).delete(synchronize_session=False)
+        db.query(Room).filter(Room.id.in_(room_ids)).delete(synchronize_session=False)
+
+    db.query(Post).filter(Post.created_by == user_id).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    return {"ok": True}
 
 
 @app.post("/api/master-admin/bosses")

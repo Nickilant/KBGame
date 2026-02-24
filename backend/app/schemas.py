@@ -81,3 +81,7 @@ class BanIn(BaseModel):
 
 class LootUpdateIn(BaseModel):
     drop_chance: float
+
+
+class PasswordUpdateIn(BaseModel):
+    password: str

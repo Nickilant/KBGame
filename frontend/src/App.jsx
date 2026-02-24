@@ -18,6 +18,8 @@ export function App() {
   const [posts, setPosts] = useState([])
   const [inventory, setInventory] = useState([])
   const [users, setUsers] = useState([])
+  const [passwordDrafts, setPasswordDrafts] = useState({})
+  const [adminMessage, setAdminMessage] = useState('')
   const [authMode, setAuthMode] = useState('login')
   const [authError, setAuthError] = useState('')
   const [authMessage, setAuthMessage] = useState('')
@@ -34,15 +36,28 @@ export function App() {
     }
   }
 
+  const loadUsers = async () => {
+    const { data } = await api.get('/api/master-admin/users', { headers })
+    setUsers(data)
+  }
+
   const loadBaseData = async () => {
     if (!token) return
+
+    const meResp = await api.get('/api/me', { headers })
+    setMe(meResp.data)
+
     await Promise.all([
-      api.get('/api/me', { headers }).then((r) => setMe(r.data)),
       api.get('/api/raid/state').then((r) => setRaid(r.data)),
       api.get('/api/news').then((r) => setPosts(r.data)),
       api.get('/api/inventory', { headers }).then((r) => setInventory(r.data)),
       loadRooms(),
     ])
+
+    if (meResp.data.role === 'master_admin') {
+      setActiveTab('admin')
+      await loadUsers()
+    }
   }
 
   useEffect(() => {
@@ -67,11 +82,6 @@ export function App() {
     }
     return () => ws.close()
   }, [token, selectedRoomId])
-
-  useEffect(() => {
-    if (!me || me.role !== 'master_admin') return
-    api.get('/api/master-admin/users', { headers }).then((r) => setUsers(r.data))
-  }, [me])
 
   const login = async (e) => {
     e.preventDefault()
@@ -152,6 +162,29 @@ export function App() {
     }
   }
 
+  const promoteToBoss = async (userId) => {
+    await api.patch(`/api/master-admin/users/${userId}/role`, { role: 'boss' }, { headers })
+    await loadUsers()
+    setAdminMessage('Роль обновлена: пользователь назначен боссом.')
+  }
+
+  const resetPassword = async (userId) => {
+    const password = passwordDrafts[userId]?.trim()
+    if (!password || password.length < 6) {
+      setAdminMessage('Новый пароль должен быть не короче 6 символов.')
+      return
+    }
+    await api.patch(`/api/master-admin/users/${userId}/password`, { password }, { headers })
+    setPasswordDrafts((prev) => ({ ...prev, [userId]: '' }))
+    setAdminMessage('Пароль пользователя обновлён.')
+  }
+
+  const deleteUser = async (userId) => {
+    await api.delete(`/api/master-admin/users/${userId}`, { headers })
+    await loadUsers()
+    setAdminMessage('Пользователь удалён.')
+  }
+
   if (!token) {
     return (
       <div className="auth-page">
@@ -195,12 +228,43 @@ export function App() {
       <header className="topbar card">
         <h1>KB Raid Arena</h1>
         <nav className="tabs">
+          {me?.role === 'master_admin' && <button onClick={() => setActiveTab('admin')} className={activeTab === 'admin' ? 'tab active' : 'tab'}>Админка</button>}
           <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
           <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
           <button onClick={() => setActiveTab('profile')} className={activeTab === 'profile' ? 'tab active' : 'tab'}>Профиль</button>
           <button onClick={() => setActiveTab('boss')} className={activeTab === 'boss' ? 'tab active' : 'tab'}>БоссБатл</button>
         </nav>
       </header>
+
+      {activeTab === 'admin' && me?.role === 'master_admin' && (
+        <main className="card">
+          <h2>Панель администратора</h2>
+          <p>Управление пользователями системы.</p>
+          {adminMessage && <div className="auth-alert auth-success">{adminMessage}</div>}
+          <div className="admin-table">
+            <div className="admin-row admin-head">
+              <span>ID</span><span>Логин</span><span>Роль</span><span>Действия</span>
+            </div>
+            {users.map((u) => (
+              <div className="admin-row" key={u.id}>
+                <span>{u.id}</span>
+                <span>{u.username}</span>
+                <span>{u.role}</span>
+                <div className="admin-actions">
+                  {u.role !== 'boss' && <button onClick={() => promoteToBoss(u.id)}>Назначить боссом</button>}
+                  <input
+                    placeholder="Новый пароль"
+                    value={passwordDrafts[u.id] || ''}
+                    onChange={(e) => setPasswordDrafts((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                  />
+                  <button onClick={() => resetPassword(u.id)}>Сменить пароль</button>
+                  {u.id !== me.id && <button className="danger" onClick={() => deleteUser(u.id)}>Удалить</button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
+      )}
 
       {activeTab === 'feed' && (
         <main className="card">
@@ -252,7 +316,6 @@ export function App() {
           <p>HP: {me?.hp} | ATK: {me?.attack} | DEF: {me?.defense} | LVL: {me?.level} | Gold: {me?.gold}</p>
           <h3>Инвентарь</h3>
           <div className="grid">{inventory.map((i) => <div key={i.id} className="item">{i.name}<small>{i.rarity}</small></div>)}</div>
-          {me?.role === 'master_admin' && <div className="card"><h3>/master-admin panel</h3>{users.map((u) => <div key={u.id}>{u.username} - {u.role} - banned:{String(u.is_banned)}</div>)}</div>}
         </main>
       )}
 

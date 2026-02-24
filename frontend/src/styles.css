@@ -51,8 +51,15 @@ body { margin: 0; font-family: Inter, system-ui, sans-serif; background: radial-
 button { background: linear-gradient(90deg, var(--accent), var(--accent-2)); color:white; border:0; padding:10px 12px; border-radius: 10px; margin-right:6px; cursor:pointer; font-weight: 600; }
 input { width: 100%; margin-bottom: 8px; background: #100d14; color: white; border:1px solid #4f4056; border-radius: 10px; padding:10px; }
 
+
+.admin-table { display: grid; gap: 8px; }
+.admin-row { display: grid; grid-template-columns: 60px 1fr 120px 2fr; gap: 10px; align-items: center; padding: 8px; border: 1px solid #4f4056; border-radius: 8px; background:#211b2c; }
+.admin-head { font-weight: 700; background:#2a2333; }
+.admin-actions { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+button.danger { background: linear-gradient(90deg, #bd2f51, #ff3b6f); }
+
 @media (max-width: 960px) {
-  .chat-layout, .boss-arena .arena-visual { grid-template-columns: 1fr; }
+  .chat-layout, .boss-arena .arena-visual, .admin-row { grid-template-columns: 1fr; }
   .topbar { flex-direction: column; gap: 12px; align-items: flex-start; }
   .tabs { flex-wrap: wrap; }
 }
