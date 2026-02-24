@@ -6,7 +6,7 @@
 .tabs{display:flex;gap:8px;flex-wrap:wrap}.tab,button{background:#2a3144;border:1px solid #3a4460;color:#fff;padding:8px 10px;border-radius:9px;cursor:pointer}
 .tab.active{background:var(--accent)}
 
-.feed-page{display:flex;flex-direction:column;gap:0;flex:1;min-height:0;padding:0 0 20px 0}
+.feed-page{display:flex;flex-direction:column;gap:0;flex:1;min-height:0;padding:0;border-radius:0;overflow:hidden}
 .posts-scroll-block{flex:1;overflow:auto;border:1px solid #3a4460;border-bottom:0;border-radius:0;padding:10px;background:#121726}
 .post-shell{position:relative;width:min(760px, calc(100% - 220px));margin-right:auto;margin-bottom:10px;padding-right:56px}
 .tg-post{position:relative;width:100%;margin-right:auto;margin-bottom:0;background:#1a2030;padding:0;overflow:hidden}
