@@ -224,9 +224,10 @@ export function App() {
               {postMedia && <div className="composer-preview">{postMedia.type === "image" ? <img src={`${api.defaults.baseURL}${postMedia.url}`} alt="preview" /> : <video controls src={`${api.defaults.baseURL}${postMedia.url}`} />}</div>}
               <div className="post-input-row">
                 <button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button>
+                <span className="input-v-sep" aria-hidden="true">|</span>
                 <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,video/*" onChange={(e) => e.target.files?.[0] && uploadMedia(e.target.files[0])} />
                 <input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" />
-                <button type="submit" disabled={uploading}>{uploading ? 'Загрузка…' : 'Отправить'}</button>
+                <button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button>
               </div>
             </form>
           )}
