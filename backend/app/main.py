@@ -38,6 +38,8 @@ from .schemas import (
     ChannelIn,
     LoginIn,
     LootUpdateIn,
+    ItemCreateIn,
+    ItemGrantIn,
     MessageIn,
     PasswordUpdateIn,
     PostCommentIn,
@@ -77,6 +79,11 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE room_members ADD COLUMN IF NOT EXISTS nickname_color VARCHAR(16) DEFAULT '#9fc5ff'"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(32) DEFAULT ''"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS hp_bonus INTEGER DEFAULT 0"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS accuracy_bonus INTEGER DEFAULT 0"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS attack_speed_bonus DOUBLE PRECISION DEFAULT 0"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS unique_skill VARCHAR(255)"))
 
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS room_members (
@@ -939,6 +946,80 @@ def update_loot(item_id: int, payload: LootUpdateIn, _: User = Depends(require_r
     return item
 
 
+@app.post("/api/master-admin/items")
+def create_item(payload: ItemCreateIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
+    item = Item(
+        name=payload.name.strip(),
+        description=payload.description.strip(),
+        rarity="custom",
+        image_url=payload.image_url,
+        hp_bonus=payload.hp_bonus,
+        attack_bonus=payload.attack_bonus,
+        defense_bonus=payload.defense_bonus,
+        accuracy_bonus=payload.accuracy_bonus,
+        attack_speed_bonus=payload.attack_speed_bonus,
+        unique_skill=(payload.unique_skill or "").strip() or None,
+    )
+    if not item.name:
+        raise HTTPException(400, "Item name is required")
+    if not item.image_url:
+        raise HTTPException(400, "Item image is required")
+    if not item.description:
+        raise HTTPException(400, "Item description is required")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@app.get("/api/master-admin/items")
+def admin_list_items(_: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
+    rows = (
+        db.query(
+            Item,
+            func.count(distinct(Inventory.player_id)).label("owned_count"),
+            func.count(Inventory.id).label("total_instances"),
+        )
+        .outerjoin(Inventory, Inventory.item_id == Item.id)
+        .group_by(Item.id)
+        .order_by(Item.id.desc())
+        .all()
+    )
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "image_url": item.image_url,
+            "hp_bonus": item.hp_bonus,
+            "attack_bonus": item.attack_bonus,
+            "defense_bonus": item.defense_bonus,
+            "accuracy_bonus": item.accuracy_bonus,
+            "attack_speed_bonus": item.attack_speed_bonus,
+            "unique_skill": item.unique_skill,
+            "unique_skill_status": "in_development",
+            "players_owned_count": int(owned_count or 0),
+            "total_instances": int(total_instances or 0),
+        }
+        for item, owned_count, total_instances in rows
+    ]
+
+
+@app.post("/api/master-admin/items/{item_id}/grant")
+def grant_item(item_id: int, payload: ItemGrantIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "Item not found")
+    player = db.query(User).filter(User.id == payload.user_id).first()
+    if not player:
+        raise HTTPException(404, "User not found")
+    qty = max(1, min(int(payload.quantity or 1), 999))
+    for _ in range(qty):
+        db.add(Inventory(player_id=player.id, item_id=item.id, equipped=False))
+    db.commit()
+    return {"ok": True, "granted": qty}
+
+
 @app.get("/api/items")
 def list_items(db: Session = Depends(get_db)):
     return db.query(Item).all()
@@ -956,9 +1037,14 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
         {
             "id": item.id,
             "name": item.name,
-            "rarity": item.rarity,
+            "description": item.description,
+            "image_url": item.image_url,
+            "hp_bonus": item.hp_bonus,
             "attack_bonus": item.attack_bonus,
             "defense_bonus": item.defense_bonus,
+            "accuracy_bonus": item.accuracy_bonus,
+            "attack_speed_bonus": item.attack_speed_bonus,
+            "unique_skill": item.unique_skill,
             "equipped": inv.equipped,
         }
         for inv, item in rows

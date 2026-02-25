@@ -107,6 +107,22 @@ class LootUpdateIn(BaseModel):
     drop_chance: float
 
 
+class ItemCreateIn(BaseModel):
+    image_url: str
+    name: str
+    description: str
+    hp_bonus: int = 0
+    attack_bonus: int = 0
+    defense_bonus: int = 0
+    accuracy_bonus: int = 0
+    attack_speed_bonus: float = 0
+    unique_skill: str | None = None
+
+
+class ItemGrantIn(BaseModel):
+    user_id: int
+    quantity: int = 1
+
 class PasswordUpdateIn(BaseModel):
     password: str
 
