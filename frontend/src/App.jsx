@@ -654,7 +654,7 @@ export function App() {
           </aside>
         </main>
       )}
-      {activeTab === 'profile' && (
+      {activeTab === 'profile' && me && (
         <main className="profile-page card">
           <section className="profile-overview card">
             <div className="avatar-wrap">
