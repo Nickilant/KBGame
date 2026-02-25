@@ -5,6 +5,7 @@ const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://loca
 const ALL_REACTIONS = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😍','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤗','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌']
 const AVATAR_SIZE = 64
 const AVATAR_RADIUS = 31
+const AVATAR_COLORS = ['#121212', '#d62828', '#f77f00', '#ffdd00', '#2a9d8f', '#3a86ff', '#8338ec', '#ff006e', '#ffffff']
 
 const createDefaultAvatar = () => {
   const canvas = document.createElement('canvas')
@@ -65,6 +66,7 @@ export function App() {
   const avatarCanvasRef = useRef(null)
   const [avatarModalOpen, setAvatarModalOpen] = useState(false)
   const [avatarTool, setAvatarTool] = useState('pencil')
+  const [avatarColor, setAvatarColor] = useState('#121212')
   const [isAvatarDrawing, setIsAvatarDrawing] = useState(false)
   const [profileAvatarPixels, setProfileAvatarPixels] = useState(localStorage.getItem('profile_avatar_pixels') || '')
   const [equippedItems, setEquippedItems] = useState({
@@ -158,9 +160,12 @@ export function App() {
       return
     }
 
-    ctx.fillStyle = '#121212'
+    ctx.fillStyle = avatarColor
     ctx.fillRect(x, y, 1, 1)
   }
+
+  const palette = AVATAR_COLORS
+
   const equipmentSlots = [
     { key: 'weapon', label: 'Оружие', accepted: 'weapon' },
     { key: 'shield', label: 'Щит', accepted: 'shield' },
@@ -923,6 +928,18 @@ export function App() {
             <div className="avatar-editor-tools">
               <button type="button" className={avatarTool === 'pencil' ? 'active' : ''} onClick={() => setAvatarTool('pencil')}>Карандаш</button>
               <button type="button" className={avatarTool === 'eraser' ? 'active' : ''} onClick={() => setAvatarTool('eraser')}>Ластик</button>
+            </div>
+            <div className="avatar-color-palette">
+              {palette.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={`avatar-color-swatch ${avatarColor === color ? 'active' : ''}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => { setAvatarTool('pencil'); setAvatarColor(color) }}
+                  aria-label={`Цвет ${color}`}
+                />
+              ))}
             </div>
             <canvas
               ref={avatarCanvasRef}
