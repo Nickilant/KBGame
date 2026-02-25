@@ -460,8 +460,10 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
         state = db.query(RoomUserState).filter(RoomUserState.room_id == payload.room_id, RoomUserState.user_id == user.id).first()
         if state and state.last_message_at:
             available_at = state.last_message_at + timedelta(seconds=room.cooldown_seconds)
-            if datetime.utcnow() < available_at:
-                raise HTTPException(429, f"Message cooldown active until {available_at.isoformat()}Z")
+            now = datetime.utcnow()
+            if now < available_at:
+                retry_after = max(1, int((available_at - now).total_seconds()))
+                raise HTTPException(429, {"code": "SLOWMODE", "retry_after_seconds": retry_after, "retry_at": available_at.isoformat() + "Z"})
         if not state:
             state = RoomUserState(room_id=payload.room_id, user_id=user.id)
             db.add(state)
@@ -471,7 +473,16 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    return msg
+    return {
+        "id": msg.id,
+        "room_id": msg.room_id,
+        "user_id": msg.user_id,
+        "username": user.username,
+        "content": msg.content,
+        "media_url": msg.media_url,
+        "media_type": msg.media_type,
+        "created_at": msg.created_at,
+    }
 
 
 @app.get("/api/chat/messages/{room_id}")
@@ -482,7 +493,27 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
     is_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user.id).first()
     if not is_member and not (room.is_main and user.role == "boss"):
         raise HTTPException(403, "You are not a member of this room")
-    return db.query(Message).filter(Message.room_id == room_id).order_by(Message.created_at.desc()).limit(50).all()[::-1]
+    rows = (
+        db.query(Message, User.username)
+        .join(User, User.id == Message.user_id)
+        .filter(Message.room_id == room_id)
+        .order_by(Message.created_at.desc())
+        .limit(50)
+        .all()[::-1]
+    )
+    return [
+        {
+            "id": msg.id,
+            "room_id": msg.room_id,
+            "user_id": msg.user_id,
+            "username": username,
+            "content": msg.content,
+            "media_url": msg.media_url,
+            "media_type": msg.media_type,
+            "created_at": msg.created_at,
+        }
+        for msg, username in rows
+    ]
 
 
 @app.delete("/api/chat/messages/{message_id}")

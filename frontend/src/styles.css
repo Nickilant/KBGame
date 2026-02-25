@@ -85,3 +85,6 @@
 .join-code-value{font-weight:700;letter-spacing:1px;padding:6px 8px;border:1px solid #3a4460;background:#111623}
 .chat-input.no-radius input:focus,.chat-input.no-radius input:focus-visible{outline:none !important;box-shadow:none !important;border:0 !important}
 .chat-code-top input:focus,.chat-code-top input:focus-visible{outline:none;box-shadow:none}
+
+.chat-input-wrap{position:relative}
+.slowmode-notice{position:absolute;left:0;right:0;bottom:100%;margin-bottom:6px;background:rgba(20,22,30,.78);border:1px solid #3a4460;padding:7px 10px;font-size:12px;backdrop-filter:blur(2px)}

@@ -28,6 +28,9 @@ export function App() {
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
   const [chatError, setChatError] = useState('')
+  const [slowmodeNotice, setSlowmodeNotice] = useState('')
+  const wsRef = useRef(null)
+  const slowmodeTimerRef = useRef(null)
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
@@ -90,6 +93,35 @@ export function App() {
     if (!token || !selectedRoomId) return
     api.get(`/api/chat/messages/${selectedRoomId}`, { headers }).then((r) => setChat(r.data))
   }, [token, selectedRoomId, headers])
+
+
+  useEffect(() => () => {
+    if (slowmodeTimerRef.current) clearTimeout(slowmodeTimerRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (!token || !selectedRoomId) return
+    const wsBase = api.defaults.baseURL.replace('http://', 'ws://').replace('https://', 'wss://')
+    const ws = new WebSocket(`${wsBase}/ws/room-${selectedRoomId}`)
+    wsRef.current = ws
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload.type === 'message_created' && payload.room_id === selectedRoomId) {
+          setChat((prev) => (prev.some((m) => m.id === payload.message.id) ? prev : [...prev, payload.message]))
+        }
+        if (payload.type === 'message_deleted' && payload.room_id === selectedRoomId) {
+          setChat((prev) => prev.filter((m) => m.id !== payload.message_id))
+        }
+      } catch {
+        // noop
+      }
+    }
+    return () => {
+      ws.close()
+      wsRef.current = null
+    }
+  }, [token, selectedRoomId])
 
   const login = async (e) => {
     e.preventDefault()
@@ -201,10 +233,25 @@ export function App() {
     setChatError('')
     try {
       const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message }, { headers })
-      setChat((prev) => [...prev, data])
+      setChat((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data]))
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'message_created', room_id: selectedRoomId, message: data }))
+      }
       setMessage('')
+      setSlowmodeNotice('')
     } catch (err) {
-      setChatError(err.response?.data?.detail || 'Не удалось отправить сообщение')
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'object' && detail?.code === 'SLOWMODE') {
+        const seconds = Number(detail.retry_after_seconds || 0)
+        const mins = Math.floor(seconds / 60)
+        const secs = seconds % 60
+        const fmt = mins > 0 ? `${mins}м ${secs}с` : `${secs}с`
+        setSlowmodeNotice(`В чате установлен слоумод, вы сможете отправить сообщение через ${fmt}`)
+        if (slowmodeTimerRef.current) clearTimeout(slowmodeTimerRef.current)
+        slowmodeTimerRef.current = setTimeout(() => setSlowmodeNotice(''), 2500)
+      } else {
+        setChatError(detail || 'Не удалось отправить сообщение')
+      }
     }
   }
 
@@ -244,6 +291,9 @@ export function App() {
   const removeMessage = async (id) => {
     await api.delete(`/api/chat/messages/${id}`, { headers })
     setChat((prev) => prev.filter((m) => m.id !== id))
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'message_deleted', room_id: selectedRoomId, message_id: id }))
+    }
   }
 
 
@@ -313,11 +363,14 @@ export function App() {
 
           <section className="posts-column">
             <section className="posts-scroll-block chat-box no-radius">
-              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b>#{m.user_id}</b>: {m.content} {m.media_url && <a href={`${api.defaults.baseURL}${m.media_url}`} target="_blank">медиа</a>} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
+              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b>{m.username || `#${m.user_id}`}</b>: {m.content} {m.media_url && <a href={`${api.defaults.baseURL}${m.media_url}`} target="_blank">медиа</a>} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
             </section>
+            <div className="chat-input-wrap">
+            {slowmodeNotice && <div className="slowmode-notice">{slowmodeNotice}</div>}
             <div className="chat-input no-radius">
               <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
               <button className="post-send-btn" onClick={sendMessage}>➤</button>
+            </div>
             </div>
             {chatError && <div className="auth-error">{chatError}</div>}
           </section>
