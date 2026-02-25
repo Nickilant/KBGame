@@ -84,6 +84,7 @@ class Message(Base):
     content = Column(Text, nullable=False)
     media_url = Column(String(255), default="")
     media_type = Column(String(32), default="")
+    media_urls = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -140,6 +141,7 @@ class Post(Base):
     image_url = Column(String(255), default="")
     video_url = Column(String(255), default="")
     audio_url = Column(String(255), default="")
+    media_urls = Column(JSON, default=list)
     channel_id = Column(Integer, ForeignKey("channels.id"), nullable=True, index=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

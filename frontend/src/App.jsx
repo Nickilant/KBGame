@@ -4,7 +4,7 @@ import axios from 'axios'
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000' })
 const ALL_REACTIONS = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😍','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤗','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌']
 const AVATAR_SIZE = 64
-const AVATAR_RADIUS = 31
+const AVATAR_RADIUS = 32
 
 const createDefaultAvatar = () => {
   const canvas = document.createElement('canvas')
@@ -32,7 +32,7 @@ export function App() {
   const [channels, setChannels] = useState([])
   const [selectedChannelId, setSelectedChannelId] = useState(null)
   const [newPostText, setNewPostText] = useState('')
-  const [postMedia, setPostMedia] = useState(null)
+  const [postMedia, setPostMedia] = useState([])
   const [uploading, setUploading] = useState(false)
   const [hoveredPostId, setHoveredPostId] = useState(null)
   const [showChannelModal, setShowChannelModal] = useState(false)
@@ -44,7 +44,7 @@ export function App() {
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
-  const [chatMedia, setChatMedia] = useState(null)
+  const [chatMedia, setChatMedia] = useState([])
   const [chatError, setChatError] = useState('')
   const [slowmodeNotice, setSlowmodeNotice] = useState('')
   const wsRef = useRef(null)
@@ -56,6 +56,8 @@ export function App() {
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
   const [joinCodeInput, setJoinCodeInput] = useState('')
   const [roomMembers, setRoomMembers] = useState([])
+  const [roomNameDraft, setRoomNameDraft] = useState('')
+  const chatSettingsAvatarInputRef = useRef(null)
 
   const [commentModalPost, setCommentModalPost] = useState(null)
   const [comments, setComments] = useState([])
@@ -123,6 +125,17 @@ export function App() {
   }
 
   const defaultAvatarImage = useMemo(() => createDefaultAvatar(), [])
+  const addMediaAttachment = async (files, setter) => {
+    const uploaded = await Promise.all(Array.from(files).map((file) => uploadMedia(file)))
+    setter((prev) => [...prev, ...uploaded.filter((item) => item?.type === 'image')])
+  }
+
+  const removeMediaAttachment = (index, setter) => {
+    setter((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  const chatAvatarLetter = (name) => (name || '?').trim().slice(0, 1).toUpperCase()
+
 
   const drawAvatarCanvas = (source) => {
     const canvas = avatarCanvasRef.current
@@ -141,7 +154,7 @@ export function App() {
   const isInsideAvatarBall = (x, y) => {
     const dx = x - (AVATAR_SIZE / 2)
     const dy = y - (AVATAR_SIZE / 2)
-    return (dx * dx) + (dy * dy) <= (AVATAR_RADIUS * AVATAR_RADIUS)
+    return (dx * dx) + (dy * dy) <= ((AVATAR_RADIUS + 0.75) * (AVATAR_RADIUS + 0.75))
   }
 
   const paintAvatarAt = (event) => {
@@ -156,7 +169,8 @@ export function App() {
     if (!ctx) return
 
     if (avatarTool === 'eraser') {
-      ctx.clearRect(x, y, 1, 1)
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(x, y, 1, 1)
       return
     }
 
@@ -252,6 +266,10 @@ export function App() {
     if (!token || !selectedRoomId) return
     api.get(`/api/rooms/${selectedRoomId}/members`, { headers }).then((r) => setRoomMembers(r.data)).catch(() => setRoomMembers([]))
   }, [token, selectedRoomId, headers])
+
+  useEffect(() => {
+    setRoomNameDraft(selectedRoom?.name || '')
+  }, [selectedRoom?.id, selectedRoom?.name])
 
   useEffect(() => {
     if (!token || !selectedRoomId) return
@@ -359,18 +377,19 @@ export function App() {
 
   const createPost = async (e) => {
     e.preventDefault()
-    if (!newPostText.trim() && !postMedia) return
+    if (!newPostText.trim() && postMedia.length === 0) return
     await api.post('/api/news', {
       title: newPostText.slice(0, 60) || 'Новый пост',
       content: newPostText || ' ',
-      image_url: postMedia?.type === 'image' ? postMedia.url : '',
-      video_url: postMedia?.type === 'video' ? postMedia.url : '',
+      image_url: postMedia[0]?.type === 'image' ? postMedia[0].url : '',
+      video_url: postMedia[0]?.type === 'video' ? postMedia[0].url : '',
+      media_urls: postMedia.filter((m) => m.type === 'image').map((m) => m.url),
       audio_url: '',
       channel_id: selectedChannelId,
     }, { headers })
     if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'posts_changed' }))
     setNewPostText('')
-    setPostMedia(null)
+    setPostMedia([])
     await Promise.all([loadFeed(false), loadChannels()])
   }
 
@@ -428,16 +447,22 @@ export function App() {
   }
 
   const sendMessage = async () => {
-    if (!selectedRoomId || (!message.trim() && !chatMedia)) return
+    if (!selectedRoomId || (!message.trim() && chatMedia.length === 0)) return
     setChatError('')
     try {
-      const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message, media_url: chatMedia?.url || '', media_type: chatMedia?.type || '' }, { headers })
+      const { data } = await api.post('/api/chat/messages', {
+        room_id: selectedRoomId,
+        content: message,
+        media_url: chatMedia[0]?.url || '',
+        media_type: chatMedia.length ? 'image' : '',
+        media_urls: chatMedia.map((m) => m.url),
+      }, { headers })
       setChat((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data]))
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'message_created', room_id: selectedRoomId, message: data }))
       }
       setMessage('')
-      setChatMedia(null)
+      setChatMedia([])
       setSlowmodeNotice('')
     } catch (err) {
       const detail = err.response?.data?.detail
@@ -671,10 +696,12 @@ export function App() {
 
           <section className="posts-column">
             <section className="posts-scroll-block">
-              {posts.map((p) => (
+              {posts.map((p) => {
+                const postImages = (p.media_urls?.length ? p.media_urls : (p.image_url ? [p.image_url] : []))
+                return (
                 <div key={p.id} className="post-shell" onMouseEnter={() => setHoveredPostId(p.id)} onMouseLeave={() => setHoveredPostId(null)}>
                   <article id={`post-${p.id}`} className="tg-post card" onClick={() => markRead(p.id)}>
-                    {p.image_url && <img className="post-image" src={`${api.defaults.baseURL}${p.image_url}`} alt="media" />}
+                    {postImages.length > 0 && <div className="post-media-grid">{postImages.map((url) => <img key={url} className="post-image" src={`${api.defaults.baseURL}${url}`} alt="media" />)}</div>}
                     {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
                     <div className="post-body">
                       <p className="post-text">{p.content}</p>
@@ -687,10 +714,10 @@ export function App() {
                   {hoveredPostId === p.id && <div className="hover-reactions-vertical">{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji}</button>)}</div>}
                   <div className="reactions-summary under-post">{Object.entries(p.reactions || {}).map(([emoji, count]) => <button className={`reaction-capsule ${p.my_reaction === emoji ? 'mine' : ''}`} key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji} {count}</button>)}</div>
                 </div>
-              ))}
+              )})}
             </section>
 
-            {isBoss && <form className="post-input-wrap" onSubmit={createPost}>{postMedia && <div className="composer-preview">{postMedia.type === 'image' ? <img src={`${api.defaults.baseURL}${postMedia.url}`} alt="preview" /> : <video controls src={`${api.defaults.baseURL}${postMedia.url}`} />}</div>}<div className="post-input-row"><button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button><span className="input-v-sep" aria-hidden="true">|</span><input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,video/*" onChange={async (e) => e.target.files?.[0] && setPostMedia(await uploadMedia(e.target.files[0]))} /><input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" /><button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button></div></form>}
+            {isBoss && <form className="post-input-wrap" onSubmit={createPost}>{postMedia.length > 0 && <div className="composer-preview thumbs">{postMedia.map((m, idx) => <div key={`${m.url}-${idx}`} className="preview-thumb-wrap"><img src={`${api.defaults.baseURL}${m.url}`} alt="preview" /><button type="button" className="preview-remove" onClick={() => removeMediaAttachment(idx, setPostMedia)}>✕</button></div>)}</div>}<div className="post-input-row"><button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button><span className="input-v-sep" aria-hidden="true">|</span><input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept="image/*" onChange={async (e) => { if (e.target.files?.length) await addMediaAttachment(e.target.files, setPostMedia); e.target.value = '' }} /><input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" /><button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button></div></form>}
           </section>
         </main>
       )}
@@ -712,14 +739,17 @@ export function App() {
 
           <section className="posts-column">
             <section className="posts-scroll-block chat-box no-radius">
-              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {m.media_url && <img className="chat-inline-image" src={`${api.defaults.baseURL}${m.media_url}`} alt="chat-media" />} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
+              {chat.map((m, i) => {
+                const mediaItems = (m.media_urls?.length ? m.media_urls : (m.media_url ? [m.media_url] : []))
+                return <div key={m.id || i} className="chat-message"><span className="chat-user-avatar" style={{ backgroundColor: m.nickname_color || '#50608a' }}>{chatAvatarLetter(m.username || `#${m.user_id}`)}</span><b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {mediaItems.map((url) => <img key={url} className="chat-inline-image" src={`${api.defaults.baseURL}${url}`} alt="chat-media" />)} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>
+              })}
             </section>
             <div className="chat-input-wrap">
             {slowmodeNotice && <div className="slowmode-notice">{slowmodeNotice}</div>}
-            {chatMedia && <div className="chat-media-preview"><img src={`${api.defaults.baseURL}${chatMedia.url}`} alt="preview" /></div>}
+            {chatMedia.length > 0 && <div className="chat-media-preview thumbs">{chatMedia.map((m, idx) => <div key={`${m.url}-${idx}`} className="preview-thumb-wrap"><img src={`${api.defaults.baseURL}${m.url}`} alt="preview" /><button type="button" className="preview-remove" onClick={() => removeMediaAttachment(idx, setChatMedia)}>✕</button></div>)}</div>}
             <div className="chat-input no-radius">
               <button type="button" className="clip-btn" onClick={() => chatFileInputRef.current?.click()}>📎</button>
-              <input type="file" ref={chatFileInputRef} style={{ display: "none" }} accept="image/*" onChange={async (e) => e.target.files?.[0] && setChatMedia(await uploadMedia(e.target.files[0]))} />
+              <input type="file" ref={chatFileInputRef} style={{ display: "none" }} multiple accept="image/*" onChange={async (e) => { if (e.target.files?.length) await addMediaAttachment(e.target.files, setChatMedia); e.target.value = '' }} />
               <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
               <button className="post-send-btn" onClick={sendMessage}>➤</button>
             </div>
@@ -730,8 +760,11 @@ export function App() {
           <aside className="chat-settings">
             <h3>Настройки чата</h3>
             {selectedRoom && canManageSelectedRoom ? <>
+              <input ref={chatSettingsAvatarInputRef} type="file" style={{ display: 'none' }} accept="image/*" onChange={async (e) => { if (!e.target.files?.[0]) return; const uploaded = await uploadMedia(e.target.files[0]); await patchRoomSettings({ avatar_url: uploaded.url }); e.target.value = '' }} />
               <div className="setting-row"><span>Медиа</span><label className="switch"><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => patchRoomSettings({ allow_media: e.target.checked })} /><span className="slider" /></label></div>
               <div className="setting-row cooldown-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label><input className="cooldown-input" type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value), cooldown_enabled: false })} placeholder="сек" /></div>
+              <div className="setting-row"><span>Название</span><input value={roomNameDraft} onChange={(e) => setRoomNameDraft(e.target.value)} onBlur={() => roomNameDraft.trim() && roomNameDraft !== selectedRoom.name && patchRoomSettings({ name: roomNameDraft })} /></div>
+              <div className="setting-row"><span>Аватар чата</span><button type="button" onClick={() => chatSettingsAvatarInputRef.current?.click()}>Загрузить</button></div>
               <div className="setting-row"><span>Код входа</span><div className="join-code-value inline">{selectedRoom.join_code || '—'}</div></div>
               <div className="chat-members"><div className="chat-members-title">Участники</div>{roomMembers.map((member) => <div key={member.id} className="chat-member-item" style={{ color: member.nickname_color || '#cfd8ff' }}>{member.username}{member.role === 'boss' ? ' #босс' : ''}</div>)}</div>
               {!selectedRoom.is_main && <button className="danger-btn" onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}

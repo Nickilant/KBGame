@@ -51,6 +51,7 @@ class MessageIn(BaseModel):
     content: str = ""
     media_url: str = ""
     media_type: str = ""
+    media_urls: list[str] = []
 
 
 class PostIn(BaseModel):
@@ -59,6 +60,7 @@ class PostIn(BaseModel):
     image_url: str = ""
     video_url: str = ""
     audio_url: str = ""
+    media_urls: list[str] = []
     channel_id: int | None = None
 
 

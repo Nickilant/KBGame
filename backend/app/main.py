@@ -68,6 +68,7 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_read_post_id INTEGER"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS audio_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS channel_id INTEGER"))
+        connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb"))
 
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_main BOOLEAN DEFAULT FALSE"))
@@ -79,6 +80,7 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE room_members ADD COLUMN IF NOT EXISTS nickname_color VARCHAR(16) DEFAULT '#9fc5ff'"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(32) DEFAULT ''"))
+        connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS hp_bonus INTEGER DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS accuracy_bonus INTEGER DEFAULT 0"))
@@ -517,12 +519,15 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
     content = (payload.content or "").strip()
     media_url = (payload.media_url or "").strip()
     media_type = (payload.media_type or "").strip()
-    if not content and not media_url:
+    media_urls = [url.strip() for url in (payload.media_urls or []) if url and url.strip()]
+    if media_url and media_url not in media_urls:
+        media_urls.insert(0, media_url)
+    if not content and not media_urls:
         raise HTTPException(400, "Message is empty")
 
-    if media_url and not room.allow_media:
+    if media_urls and not room.allow_media:
         raise HTTPException(400, "Media disabled in this room")
-    if media_url and media_type and media_type != "image":
+    if media_urls and media_type and media_type != "image":
         raise HTTPException(400, "Only images are allowed in chat messages")
 
     if user.role != "boss" and room.cooldown_enabled and room.cooldown_seconds > 0:
@@ -538,7 +543,14 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
             db.add(state)
         state.last_message_at = datetime.utcnow()
 
-    msg = Message(room_id=payload.room_id, user_id=user.id, content=content or "", media_url=media_url, media_type=media_type)
+    msg = Message(
+        room_id=payload.room_id,
+        user_id=user.id,
+        content=content or "",
+        media_url=(media_urls[0] if media_urls else ""),
+        media_type=(media_type or ("image" if media_urls else "")),
+        media_urls=media_urls,
+    )
     db.add(msg)
     db.commit()
     db.refresh(msg)
@@ -553,6 +565,7 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
         "content": msg.content,
         "media_url": msg.media_url,
         "media_type": msg.media_type,
+        "media_urls": msg.media_urls or ([msg.media_url] if msg.media_url else []),
         "created_at": msg.created_at,
     }
 
@@ -585,6 +598,7 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
             "content": msg.content,
             "media_url": msg.media_url,
             "media_type": msg.media_type,
+            "media_urls": msg.media_urls or ([msg.media_url] if msg.media_url else []),
             "created_at": msg.created_at,
         }
         for msg, username, role, nickname_color in rows
@@ -691,7 +705,14 @@ def create_post(payload: PostIn, user: User = Depends(require_roles("boss")), db
     if payload.channel_id is not None and not db.query(Channel).filter(Channel.id == payload.channel_id).first():
         raise HTTPException(404, "Channel not found")
 
-    post = Post(**payload.model_dump(), created_by=user.id)
+    media_urls = [url.strip() for url in (payload.media_urls or []) if url and url.strip()]
+    payload_data = payload.model_dump()
+    if payload.image_url and payload.image_url not in media_urls:
+        media_urls.insert(0, payload.image_url)
+    payload_data["media_urls"] = media_urls
+    payload_data["image_url"] = media_urls[0] if media_urls else (payload.image_url or "")
+
+    post = Post(**payload_data, created_by=user.id)
     db.add(post)
     db.commit()
     db.refresh(post)
@@ -806,6 +827,7 @@ def list_posts(channel_id: int | None = Query(default=None), user: User = Depend
             "image_url": p.image_url,
             "video_url": p.video_url,
             "audio_url": p.audio_url,
+            "media_urls": p.media_urls or ([p.image_url] if p.image_url else []),
             "channel_id": p.channel_id,
             "author": username,
             "created_at": p.created_at,
