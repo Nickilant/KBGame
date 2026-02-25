@@ -3,6 +3,23 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000' })
 const ALL_REACTIONS = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😍','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤗','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌']
+const AVATAR_SIZE = 64
+const AVATAR_RADIUS = 31
+
+const createDefaultAvatar = () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = AVATAR_SIZE
+  canvas.height = AVATAR_SIZE
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+
+  ctx.clearRect(0, 0, AVATAR_SIZE, AVATAR_SIZE)
+  ctx.fillStyle = '#fff'
+  ctx.beginPath()
+  ctx.arc(AVATAR_SIZE / 2, AVATAR_SIZE / 2, AVATAR_RADIUS, 0, Math.PI * 2)
+  ctx.fill()
+  return canvas.toDataURL('image/png')
+}
 
 export function App() {
   const [token, setToken] = useState(localStorage.getItem('token') || '')
@@ -45,9 +62,13 @@ export function App() {
   const [commentDraft, setCommentDraft] = useState('')
   const [showCommentEmoji, setShowCommentEmoji] = useState(false)
   const commentsRef = useRef(null)
-  const profileAvatarInputRef = useRef(null)
-
-  const [profileAvatar, setProfileAvatar] = useState(localStorage.getItem('profile_avatar') || '')
+  const avatarCanvasRef = useRef(null)
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false)
+  const [avatarTool, setAvatarTool] = useState('pencil')
+  const [avatarColor, setAvatarColor] = useState('#121212')
+  const avatarColorInputRef = useRef(null)
+  const [isAvatarDrawing, setIsAvatarDrawing] = useState(false)
+  const [profileAvatarPixels, setProfileAvatarPixels] = useState(localStorage.getItem('profile_avatar_pixels') || '')
   const [equippedItems, setEquippedItems] = useState({
     weapon: null,
     shield: null,
@@ -100,6 +121,49 @@ export function App() {
     accuracy: 40 + (totalBonuses.accuracy || 0),
     speed: 1 + ((totalBonuses.speed || 0) / 100),
   }
+
+  const defaultAvatarImage = useMemo(() => createDefaultAvatar(), [])
+
+  const drawAvatarCanvas = (source) => {
+    const canvas = avatarCanvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const img = new Image()
+    img.onload = () => {
+      ctx.clearRect(0, 0, AVATAR_SIZE, AVATAR_SIZE)
+      ctx.drawImage(img, 0, 0, AVATAR_SIZE, AVATAR_SIZE)
+    }
+    img.src = source || defaultAvatarImage
+  }
+
+  const isInsideAvatarBall = (x, y) => {
+    const dx = x - (AVATAR_SIZE / 2)
+    const dy = y - (AVATAR_SIZE / 2)
+    return (dx * dx) + (dy * dy) <= (AVATAR_RADIUS * AVATAR_RADIUS)
+  }
+
+  const paintAvatarAt = (event) => {
+    const canvas = avatarCanvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const x = Math.floor(((event.clientX - rect.left) / rect.width) * AVATAR_SIZE)
+    const y = Math.floor(((event.clientY - rect.top) / rect.height) * AVATAR_SIZE)
+
+    if (!isInsideAvatarBall(x, y)) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    if (avatarTool === 'eraser') {
+      ctx.clearRect(x, y, 1, 1)
+      return
+    }
+
+    ctx.fillStyle = avatarColor
+    ctx.fillRect(x, y, 1, 1)
+  }
+
   const equipmentSlots = [
     { key: 'weapon', label: 'Оружие', accepted: 'weapon' },
     { key: 'shield', label: 'Щит', accepted: 'shield' },
@@ -156,6 +220,18 @@ export function App() {
     localStorage.setItem('token', token)
     loadBase()
   }, [token])
+
+
+  useEffect(() => {
+    if (profileAvatarPixels) return
+    setProfileAvatarPixels(defaultAvatarImage)
+    localStorage.setItem('profile_avatar_pixels', defaultAvatarImage)
+  }, [profileAvatarPixels, defaultAvatarImage])
+
+  useEffect(() => {
+    if (!avatarModalOpen) return
+    drawAvatarCanvas(profileAvatarPixels || defaultAvatarImage)
+  }, [avatarModalOpen, profileAvatarPixels, defaultAvatarImage])
 
   useEffect(() => {
     if (!token || selectedChannelId == null) return
@@ -417,10 +493,19 @@ export function App() {
     }
   }
 
-  const updateProfileAvatar = async (file) => {
-    const uploaded = await uploadMedia(file)
-    setProfileAvatar(uploaded.url)
-    localStorage.setItem('profile_avatar', uploaded.url)
+  const saveAvatarDrawing = () => {
+    const canvas = avatarCanvasRef.current
+    if (!canvas) return
+    const snapshot = canvas.toDataURL('image/png')
+    setProfileAvatarPixels(snapshot)
+    localStorage.setItem('profile_avatar_pixels', snapshot)
+    setAvatarModalOpen(false)
+  }
+
+  const resetAvatarDrawing = () => {
+    setProfileAvatarPixels(defaultAvatarImage)
+    localStorage.setItem('profile_avatar_pixels', defaultAvatarImage)
+    drawAvatarCanvas(defaultAvatarImage)
   }
 
   const equipItem = (item) => {
@@ -658,19 +743,12 @@ export function App() {
         <main className="profile-page card">
           <section className="profile-overview card">
             <div className="avatar-wrap">
-              <img
-                className="profile-avatar"
-                src={profileAvatar ? `${api.defaults.baseURL}${profileAvatar}` : 'https://placehold.co/180x180/171d2f/ffffff?text=RPG'}
-                alt="Аватар"
-              />
-              <button type="button" onClick={() => profileAvatarInputRef.current?.click()}>Сменить аватар</button>
-              <input
-                type="file"
-                ref={profileAvatarInputRef}
-                style={{ display: 'none' }}
-                accept="image/*"
-                onChange={async (e) => e.target.files?.[0] && updateProfileAvatar(e.target.files[0])}
-              />
+              <div className="profile-avatar" role="img" aria-label="Аватар">
+                <button type="button" className="avatar-edit-btn" onClick={() => setAvatarModalOpen(true)} aria-label="Редактировать аватар">✎</button>
+                <div className="avatar-ball-frame">
+                  <img src={profileAvatarPixels || defaultAvatarImage} alt="Кастомный аватар" className="avatar-ball-image" />
+                </div>
+              </div>
             </div>
             <div className="profile-main">
               <h2>{me.username}</h2>
@@ -840,6 +918,51 @@ export function App() {
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
       {showRoomModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый чат</h3><input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Название чата" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewRoomAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowRoomModal(false)}>Отмена</button><button onClick={createRoom}>Создать</button></div></div></div>}
+
+      {avatarModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal card avatar-editor-modal">
+            <h3>Редактор аватара</h3>
+            <div className="avatar-editor-tools">
+              <button type="button" className={avatarTool === 'pencil' ? 'active' : ''} onClick={() => setAvatarTool('pencil')}>Карандаш</button>
+              <button type="button" className={avatarTool === 'eraser' ? 'active' : ''} onClick={() => setAvatarTool('eraser')}>Ластик</button>
+            </div>
+            <div className="avatar-color-picker">
+              <button
+                type="button"
+                className="avatar-color-swatch"
+                style={{ backgroundColor: avatarColor }}
+                onClick={() => avatarColorInputRef.current?.click()}
+                aria-label="Выбрать цвет"
+              />
+              <input
+                ref={avatarColorInputRef}
+                type="color"
+                value={avatarColor}
+                className="avatar-color-native"
+                onChange={(e) => { setAvatarTool('pencil'); setAvatarColor(e.target.value) }}
+                aria-label="Палитра цветов"
+              />
+            </div>
+            <canvas
+              ref={avatarCanvasRef}
+              className="avatar-editor-canvas"
+              width={AVATAR_SIZE}
+              height={AVATAR_SIZE}
+              onPointerDown={(e) => { setIsAvatarDrawing(true); paintAvatarAt(e) }}
+              onPointerMove={(e) => isAvatarDrawing && paintAvatarAt(e)}
+              onPointerUp={() => setIsAvatarDrawing(false)}
+              onPointerLeave={() => setIsAvatarDrawing(false)}
+            />
+            <div className="channel-modal-actions">
+              <button type="button" onClick={resetAvatarDrawing}>Сбросить</button>
+              <button type="button" onClick={() => setAvatarModalOpen(false)}>Отмена</button>
+              <button type="button" onClick={saveAvatarDrawing}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {commentModalPost && <div className="modal-backdrop"><div className="modal card"><div className="comments-header"><button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button><span className="header-sep">|</span><h3>Комментарии</h3></div><div className="comments-list fixed" ref={commentsRef}>{comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}<button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button></div><div className="comment-input-wrap"><input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" /><div className="comment-actions-right"><button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button><button className="send-inline" onClick={sendComment}>›</button>{showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}</div></div></div></div>}
     </div>
