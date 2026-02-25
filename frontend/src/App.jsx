@@ -31,6 +31,7 @@ export function App() {
   const [chatError, setChatError] = useState('')
   const [slowmodeNotice, setSlowmodeNotice] = useState('')
   const wsRef = useRef(null)
+  const syncWsRef = useRef(null)
   const slowmodeTimerRef = useRef(null)
   const [showRoomModal, setShowRoomModal] = useState(false)
   const chatFileInputRef = useRef(null)
@@ -151,6 +152,30 @@ export function App() {
     return () => clearInterval(intervalId)
   }, [token, headers])
 
+  useEffect(() => {
+    if (!token) return
+    const wsBase = api.defaults.baseURL.replace('http://', 'ws://').replace('https://', 'wss://')
+    const ws = new WebSocket(`${wsBase}/ws/system-sync`)
+    syncWsRef.current = ws
+    ws.onmessage = async (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload.type === 'channels_changed') {
+          await loadChannels()
+        }
+        if (payload.type === 'rooms_changed') {
+          await loadRooms()
+        }
+      } catch {
+        // noop
+      }
+    }
+    return () => {
+      ws.close()
+      syncWsRef.current = null
+    }
+  }, [token, headers])
+
   const login = async (e) => {
     e.preventDefault()
     const f = new FormData(e.target)
@@ -209,6 +234,7 @@ export function App() {
   const createChannel = async () => {
     if (!newChannelName.trim()) return
     await api.post('/api/channels', { name: newChannelName, avatar_url: newChannelAvatar }, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'channels_changed' }))
     setNewChannelName('')
     setNewChannelAvatar('')
     setShowChannelModal(false)
@@ -217,6 +243,7 @@ export function App() {
 
   const deleteChannel = async (channelId) => {
     await api.delete(`/api/channels/${channelId}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'channels_changed' }))
     await loadChannels()
     if (selectedChannelId === channelId) {
       setSelectedChannelId(null)
@@ -287,6 +314,7 @@ export function App() {
   const createRoom = async () => {
     if (!newRoomName.trim()) return
     await api.post('/api/rooms', { name: newRoomName, avatar_url: newRoomAvatar }, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'rooms_changed' }))
     setNewRoomName('')
     setNewRoomAvatar('')
     setShowRoomModal(false)
@@ -295,6 +323,7 @@ export function App() {
 
   const deleteRoom = async (roomId) => {
     await api.delete(`/api/rooms/${roomId}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'rooms_changed' }))
     await loadRooms()
   }
 
@@ -307,6 +336,7 @@ export function App() {
   const joinByCode = async () => {
     if (!joinCodeInput.trim()) return
     await api.get(`/api/rooms/join/${joinCodeInput.trim().toUpperCase()}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'rooms_changed' }))
     setJoinCodeInput('')
     await loadRooms()
   }
