@@ -31,7 +31,7 @@ export function App() {
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
-  const [joinLink, setJoinLink] = useState('')
+  const [myJoinCode, setMyJoinCode] = useState('')
   const [joinCodeInput, setJoinCodeInput] = useState('')
 
   const [commentModalPost, setCommentModalPost] = useState(null)
@@ -228,10 +228,10 @@ export function App() {
     setRooms((prev) => prev.map((r) => (r.id === data.id ? data : r)))
   }
 
-  const fetchJoinLink = async () => {
+  const fetchJoinCode = async () => {
     if (!selectedRoomId || !canManageSelectedRoom) return
-    const { data } = await api.get(`/api/rooms/${selectedRoomId}/join-link`, { headers })
-    setJoinLink(`${api.defaults.baseURL}${data.join_path}`)
+    const { data } = await api.get(`/api/rooms/${selectedRoomId}/join-code`, { headers })
+    setMyJoinCode(data.join_code || '')
   }
 
   const joinByCode = async () => {
@@ -300,6 +300,7 @@ export function App() {
         <main className="chat-layout card">
           <aside className="channels-sidebar">
             <div className="channels-header">Чаты <span>|</span><button onClick={() => setShowRoomModal(true)} className="add-channel-btn">+</button></div>
+            <div className="chat-code-top join-row"><input value={joinCodeInput} onChange={(e) => setJoinCodeInput(e.target.value)} placeholder="Код чата" /><button onClick={joinByCode}>✓</button></div>
             <div className="channels-list">
               {rooms.map((r) => (
                 <button key={r.id} className={`channel-item ${selectedRoomId === r.id ? 'active' : ''}`} onClick={() => setSelectedRoomId(r.id)}>
@@ -307,10 +308,6 @@ export function App() {
                   <div className="channel-main"><span>{r.name}</span>{r.is_main && <small>main</small>}</div>
                 </button>
               ))}
-            </div>
-            <div className="chat-invites">
-              <h4>Вступить по коду</h4>
-              <div className="join-row"><input value={joinCodeInput} onChange={(e) => setJoinCodeInput(e.target.value)} placeholder="Код чата" /><button onClick={joinByCode}>✓</button></div>
             </div>
           </aside>
 
@@ -320,7 +317,7 @@ export function App() {
             </section>
             <div className="chat-input no-radius">
               <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
-              <button className="post-send-btn" onClick={sendMessage}>✓</button>
+              <button className="post-send-btn" onClick={sendMessage}>➤</button>
             </div>
             {chatError && <div className="auth-error">{chatError}</div>}
           </section>
@@ -331,8 +328,8 @@ export function App() {
               <div className="setting-row"><span>Медиа</span><label className="switch"><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => patchRoomSettings({ allow_media: e.target.checked })} /><span className="slider" /></label></div>
               <div className="setting-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label></div>
               <input type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value) })} placeholder="Секунды кулдауна" />
-              <div className="setting-row"><span>Ссылка входа</span><button onClick={fetchJoinLink}>Получить</button></div>
-              {joinLink && <a href={joinLink} target="_blank" rel="noreferrer">{joinLink}</a>}
+              <div className="setting-row"><span>Код входа</span><button onClick={fetchJoinCode}>Показать</button></div>
+              {myJoinCode && <div className="join-code-value">{myJoinCode}</div>}
               {!selectedRoom.is_main && <button onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
             </> : <p>Недостаточно прав для настройки.</p>}
           </aside>

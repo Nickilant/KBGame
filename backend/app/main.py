@@ -413,8 +413,8 @@ def delete_room(room_id: int, user: User = Depends(get_current_user), db: Sessio
     return {"ok": True}
 
 
-@app.get("/api/rooms/{room_id}/join-link")
-def get_join_link(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@app.get("/api/rooms/{room_id}/join-code")
+def get_join_code(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise HTTPException(404, "Room not found")
@@ -423,7 +423,7 @@ def get_join_link(room_id: int, user: User = Depends(get_current_user), db: Sess
     if not room.join_code:
         room.join_code = _generate_join_code(db)
         db.commit()
-    return {"join_code": room.join_code, "join_path": f"/api/rooms/join/{room.join_code}"}
+    return {"join_code": room.join_code}
 
 
 @app.get("/api/rooms/join/{join_code}")
