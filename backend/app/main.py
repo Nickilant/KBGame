@@ -216,7 +216,11 @@ def init_data():
             global_room.join_code = "GLOBAL"
 
     if not db.query(RoomMember).filter(RoomMember.room_id == global_room.id, RoomMember.user_id == admin.id).first():
-        db.add(RoomMember(room_id=global_room.id, user_id=admin.id, nickname_color=_generate_nickname_color()))
+        db.add(RoomMember(room_id=global_room.id, user_id=admin.id, nickname_color=_pastel_from_seed(global_room.id, admin.id)))
+
+    stale_members = db.query(RoomMember).filter((RoomMember.nickname_color.is_(None)) | (RoomMember.nickname_color == "#9fc5ff")).all()
+    for member in stale_members:
+        member.nickname_color = _pastel_from_seed(member.room_id, member.user_id)
 
 
     if not db.query(Boss).first():
@@ -332,10 +336,24 @@ def _generate_nickname_color() -> str:
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
     return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
+def _pastel_from_seed(room_id: int, user_id: int) -> str:
+    import colorsys
+
+    seed = ((room_id * 92821) ^ (user_id * 68917)) % 360
+    h = seed / 360.0
+    s = 0.36
+    v = 0.93
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+
 def _ensure_room_member(db: Session, room_id: int, user_id: int):
     member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
     if not member:
-        db.add(RoomMember(room_id=room_id, user_id=user_id, nickname_color=_generate_nickname_color()))
+        db.add(RoomMember(room_id=room_id, user_id=user_id, nickname_color=_pastel_from_seed(room_id, user_id)))
+        return
+    if not member.nickname_color or member.nickname_color == "#9fc5ff":
+        member.nickname_color = _pastel_from_seed(room_id, user_id)
 
 
 def _can_manage_room(user: User, room: Room) -> bool:
@@ -355,7 +373,7 @@ def create_room(payload: RoomIn, user: User = Depends(get_current_user), db: Ses
     room = Room(name=name, avatar_url=payload.avatar_url or "", created_by=user.id, is_main=False, join_code=_generate_join_code(db))
     db.add(room)
     db.flush()
-    db.add(RoomMember(room_id=room.id, user_id=user.id, nickname_color=_generate_nickname_color()))
+    db.add(RoomMember(room_id=room.id, user_id=user.id, nickname_color=_pastel_from_seed(room.id, user.id)))
     db.commit()
     db.refresh(room)
     return _room_to_dict(room, user)
@@ -456,6 +474,9 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
         raise HTTPException(404, "Room not found")
 
     is_member = db.query(RoomMember).filter(RoomMember.room_id == payload.room_id, RoomMember.user_id == user.id).first()
+    if not is_member and room.is_main and user.role == "boss":
+        _ensure_room_member(db, room.id, user.id)
+        is_member = True
     if not is_member and not (room.is_main and user.role == "boss"):
         raise HTTPException(403, "You are not a member of this room")
 
@@ -494,7 +515,7 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
         "user_id": msg.user_id,
         "username": user.username,
         "role": user.role,
-        "nickname_color": member.nickname_color if member else "#9fc5ff",
+        "nickname_color": (member.nickname_color if member and member.nickname_color else _pastel_from_seed(msg.room_id, msg.user_id)),
         "content": msg.content,
         "media_url": msg.media_url,
         "media_type": msg.media_type,
@@ -513,7 +534,7 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
     rows = (
         db.query(Message, User.username, User.role, RoomMember.nickname_color)
         .join(User, User.id == Message.user_id)
-        .join(RoomMember, (RoomMember.room_id == Message.room_id) & (RoomMember.user_id == Message.user_id))
+        .outerjoin(RoomMember, (RoomMember.room_id == Message.room_id) & (RoomMember.user_id == Message.user_id))
         .filter(Message.room_id == room_id)
         .order_by(Message.created_at.desc())
         .limit(50)
@@ -526,7 +547,7 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
             "user_id": msg.user_id,
             "username": username,
             "role": role,
-            "nickname_color": nickname_color or "#9fc5ff",
+            "nickname_color": nickname_color or _pastel_from_seed(msg.room_id, msg.user_id),
             "content": msg.content,
             "media_url": msg.media_url,
             "media_type": msg.media_type,
