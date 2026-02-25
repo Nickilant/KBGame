@@ -106,7 +106,7 @@
 
 .chat-members{margin-top:6px;border:1px solid #3a4460;background:#111623;max-height:180px;overflow:auto}.chat-members-title{padding:6px 8px;border-bottom:1px solid #3a4460;font-size:12px;color:#aab4d2}.chat-member-item{padding:6px 8px;border-bottom:1px solid #2a3248}.chat-member-item:last-child{border-bottom:0}
 
-.profile-page{flex:1;min-height:0;display:grid;grid-template-columns:1.15fr .85fr;grid-template-areas:"overview equipment" "inventory equipment" "abilities equipment";gap:10px;padding:0;border-radius:0;overflow:hidden}
+.profile-page{flex:1;min-height:0;display:grid;grid-template-columns:1.15fr .85fr;grid-template-areas:"overview equipment" "inventory abilities";gap:10px;padding:0;border-radius:0;overflow:hidden}
 .profile-overview{grid-area:overview;display:grid;grid-template-columns:220px 1fr;gap:14px;border-radius:0;background:radial-gradient(circle at top left,#222b44,#151b2c)}
 .avatar-wrap{display:grid;align-content:start;gap:8px}.profile-avatar{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;border:2px solid #4f5f86;box-shadow:0 0 0 3px rgba(224,177,94,.2)}
 .profile-main h2{margin:0 0 4px 0}.role-chip{display:inline-flex;margin:0 0 12px 0;padding:4px 10px;border-radius:999px;background:#2b3452;color:#d9e5ff;font-size:13px}
@@ -131,8 +131,9 @@
 .ability-slot{padding:10px;border:1px dashed #45527a;border-radius:10px;background:#0f1729;display:grid;gap:4px}
 .ability-slot span{font-size:12px;color:#9db0dd}.ability-slot strong{font-size:13px}
 
-.admin-page{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0;border-radius:0;overflow:hidden}
+.admin-page{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0;border-radius:0;overflow:hidden;align-content:start}
 .admin-item-form{display:grid;gap:8px}
+.admin-item-form label{font-size:12px;color:#9fb0db}
 .admin-item-form input,.grant-controls select,.grant-controls input{width:100%;background:#111623;color:#fff;border:1px solid #3a4460;padding:10px;border-radius:8px}
 .admin-items-list{display:flex;flex-direction:column;min-height:0}
 .admin-item-list{display:grid;gap:8px;overflow:auto;padding-right:4px}
@@ -140,5 +141,14 @@
 .admin-item-row img{width:56px;height:56px;border-radius:8px;object-fit:cover}
 .admin-item-row h4{margin:0 0 4px 0}.admin-item-row p{margin:0 0 4px 0;color:#cdd8f5;font-size:13px}.admin-item-row small{display:block;color:#9fb0db;font-size:12px}
 .grant-controls{display:grid;grid-template-columns:1fr 100px;gap:8px;margin-bottom:10px}
+.admin-users-panel,.admin-boss-panel{grid-column:span 1}
+.admin-users-list{display:grid;gap:8px;max-height:320px;overflow:auto}
+.admin-user-row{padding:10px;border:1px solid #344160;background:#0f1729;border-radius:10px;display:grid;gap:8px}
+.admin-user-head{display:flex;justify-content:space-between;align-items:center}
+.admin-user-head small{color:#9fb0db}
+.admin-user-controls{display:grid;grid-template-columns:160px repeat(5,1fr);gap:6px}
+.admin-user-controls select,.admin-user-controls input,.admin-boss-form input{width:100%;background:#111623;color:#fff;border:1px solid #3a4460;padding:8px;border-radius:8px}
+.admin-user-actions{display:flex;gap:8px}
+.admin-boss-form{display:grid;grid-template-columns:1.2fr repeat(3,.6fr) auto;gap:8px}
 
-@media (max-width:960px){.profile-page{grid-template-columns:1fr;grid-template-areas:"overview" "equipment" "inventory" "abilities"}.profile-overview{grid-template-columns:1fr}.admin-page{grid-template-columns:1fr}}
+@media (max-width:960px){.profile-page{grid-template-columns:1fr;grid-template-areas:"overview" "equipment" "abilities" "inventory"}.profile-overview{grid-template-columns:1fr}.admin-page{grid-template-columns:1fr}.admin-user-controls{grid-template-columns:1fr}.admin-boss-form{grid-template-columns:1fr}}

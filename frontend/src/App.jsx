@@ -9,7 +9,7 @@ export function App() {
   const [authMode, setAuthMode] = useState('login')
   const [authError, setAuthError] = useState('')
 
-  const [activeTab, setActiveTab] = useState('feed')
+  const [activeTab, setActiveTab] = useState('profile')
   const [me, setMe] = useState(null)
   const [posts, setPosts] = useState([])
   const [channels, setChannels] = useState([])
@@ -62,6 +62,8 @@ export function App() {
   const [uniqueAbilities] = useState(Array(10).fill(null))
   const [adminUsers, setAdminUsers] = useState([])
   const [adminItems, setAdminItems] = useState([])
+  const [adminUserDrafts, setAdminUserDrafts] = useState({})
+  const [newBoss, setNewBoss] = useState({ name: '', hp: 1000, attack: 40, defense: 15 })
   const [selectedGrantUserId, setSelectedGrantUserId] = useState('')
   const [grantQuantity, setGrantQuantity] = useState(1)
   const [newItem, setNewItem] = useState({
@@ -459,8 +461,22 @@ export function App() {
       api.get('/api/master-admin/users', { headers }),
       api.get('/api/master-admin/items', { headers }),
     ])
-    setAdminUsers(usersResp.data.filter((u) => u.role === 'player'))
+    setAdminUsers(usersResp.data)
     setAdminItems(itemsResp.data)
+    setAdminUserDrafts((prev) => {
+      const next = { ...prev }
+      usersResp.data.forEach((u) => {
+        next[u.id] = {
+          role: prev[u.id]?.role ?? u.role,
+          hp: prev[u.id]?.hp ?? u.hp,
+          attack: prev[u.id]?.attack ?? u.attack,
+          defense: prev[u.id]?.defense ?? u.defense,
+          level: prev[u.id]?.level ?? u.level,
+          gold: prev[u.id]?.gold ?? u.gold,
+        }
+      })
+      return next
+    })
     if (!selectedGrantUserId && usersResp.data.length) {
       setSelectedGrantUserId(String(usersResp.data[0].id))
     }
@@ -487,6 +503,53 @@ export function App() {
       quantity: Math.max(1, Number(grantQuantity || 1)),
     }, { headers })
     await loadAdminPanel()
+  }
+
+  const updateAdminUserDraft = (userId, field, value) => {
+    setAdminUserDrafts((prev) => ({
+      ...prev,
+      [userId]: {
+        role: prev[userId]?.role ?? 'player',
+        hp: prev[userId]?.hp ?? 100,
+        attack: prev[userId]?.attack ?? 20,
+        defense: prev[userId]?.defense ?? 5,
+        level: prev[userId]?.level ?? 1,
+        gold: prev[userId]?.gold ?? 0,
+        ...prev[userId],
+        [field]: value,
+      },
+    }))
+  }
+
+  const applyAdminUserChanges = async (userId) => {
+    const draft = adminUserDrafts[userId]
+    if (!draft) return
+    await api.patch(`/api/master-admin/users/${userId}/role`, { role: draft.role }, { headers })
+    await api.patch(`/api/master-admin/users/${userId}/stats`, {
+      hp: Number(draft.hp),
+      attack: Number(draft.attack),
+      defense: Number(draft.defense),
+      level: Number(draft.level),
+      gold: Number(draft.gold),
+    }, { headers })
+    await loadAdminPanel()
+  }
+
+  const toggleUserBan = async (userId, isBanned) => {
+    await api.patch(`/api/master-admin/users/${userId}/ban`, { is_banned: !isBanned }, { headers })
+    await loadAdminPanel()
+  }
+
+  const createBossFromAdmin = async () => {
+    if (!newBoss.name.trim()) return
+    await api.post('/api/master-admin/bosses', {
+      name: newBoss.name.trim(),
+      hp: Number(newBoss.hp),
+      attack: Number(newBoss.attack),
+      defense: Number(newBoss.defense),
+      abilities: [],
+    }, { headers })
+    setNewBoss({ name: '', hp: 1000, attack: 40, defense: 15 })
   }
 
   useEffect(() => {
@@ -679,16 +742,70 @@ export function App() {
           <section className="card admin-create-item">
             <h3>Создание предмета</h3>
             <div className="admin-item-form">
+              <label>Картинка предмета (URL)</label>
               <input value={newItem.image_url} placeholder="Картинка (URL)" onChange={(e) => setNewItem((p) => ({ ...p, image_url: e.target.value }))} />
+              <label>Название предмета</label>
               <input value={newItem.name} placeholder="Название" onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
+              <label>Описание предмета</label>
               <input value={newItem.description} placeholder="Описание" onChange={(e) => setNewItem((p) => ({ ...p, description: e.target.value }))} />
+              <label>Здоровье (HP) — сколько добавляет к базовому здоровью</label>
               <input type="number" value={newItem.hp_bonus} placeholder="HP" onChange={(e) => setNewItem((p) => ({ ...p, hp_bonus: e.target.value }))} />
+              <label>Урон — бонус к урону персонажа</label>
               <input type="number" value={newItem.attack_bonus} placeholder="Урон" onChange={(e) => setNewItem((p) => ({ ...p, attack_bonus: e.target.value }))} />
+              <label>Защита — бонус к защите персонажа</label>
               <input type="number" value={newItem.defense_bonus} placeholder="Защита" onChange={(e) => setNewItem((p) => ({ ...p, defense_bonus: e.target.value }))} />
+              <label>Точность — бонус к шансу попадания (в %)</label>
               <input type="number" value={newItem.accuracy_bonus} placeholder="Точность" onChange={(e) => setNewItem((p) => ({ ...p, accuracy_bonus: e.target.value }))} />
+              <label>Скорость атаки — добавка к базовой скорости (например 0.1)</label>
               <input type="number" step="0.01" value={newItem.attack_speed_bonus} placeholder="Скорость атаки" onChange={(e) => setNewItem((p) => ({ ...p, attack_speed_bonus: e.target.value }))} />
+              <label>Уникальное умение (макс. 1 на предмет, пока в разработке)</label>
               <input value={newItem.unique_skill} placeholder="Уникальное умение (макс. 1, в разработке)" onChange={(e) => setNewItem((p) => ({ ...p, unique_skill: e.target.value }))} />
               <button onClick={createAdminItem}>Создать предмет</button>
+            </div>
+          </section>
+
+          <section className="card admin-users-panel">
+            <h3>Управление пользователями (старый функционал)</h3>
+            <div className="admin-users-list">
+              {adminUsers.map((u) => {
+                const draft = adminUserDrafts[u.id] || { role: u.role, hp: u.hp, attack: u.attack, defense: u.defense, level: u.level, gold: u.gold }
+                return (
+                  <article key={u.id} className="admin-user-row">
+                    <div className="admin-user-head">
+                      <strong>{u.username}</strong>
+                      <small>{u.is_banned ? 'Забанен' : 'Активен'}</small>
+                    </div>
+                    <div className="admin-user-controls">
+                      <select value={draft.role} onChange={(e) => updateAdminUserDraft(u.id, 'role', e.target.value)}>
+                        <option value="player">player</option>
+                        <option value="boss">boss</option>
+                        <option value="admin">admin</option>
+                        <option value="master_admin">master_admin</option>
+                      </select>
+                      <input type="number" value={draft.hp} onChange={(e) => updateAdminUserDraft(u.id, 'hp', e.target.value)} placeholder="HP" />
+                      <input type="number" value={draft.attack} onChange={(e) => updateAdminUserDraft(u.id, 'attack', e.target.value)} placeholder="Урон" />
+                      <input type="number" value={draft.defense} onChange={(e) => updateAdminUserDraft(u.id, 'defense', e.target.value)} placeholder="Защита" />
+                      <input type="number" value={draft.level} onChange={(e) => updateAdminUserDraft(u.id, 'level', e.target.value)} placeholder="Уровень" />
+                      <input type="number" value={draft.gold} onChange={(e) => updateAdminUserDraft(u.id, 'gold', e.target.value)} placeholder="Золото" />
+                    </div>
+                    <div className="admin-user-actions">
+                      <button onClick={() => applyAdminUserChanges(u.id)}>Сохранить</button>
+                      <button onClick={() => toggleUserBan(u.id, u.is_banned)}>{u.is_banned ? 'Разбанить' : 'Забанить'}</button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+
+          <section className="card admin-boss-panel">
+            <h3>Создание босса (старый функционал)</h3>
+            <div className="admin-boss-form">
+              <input value={newBoss.name} onChange={(e) => setNewBoss((p) => ({ ...p, name: e.target.value }))} placeholder="Имя босса" />
+              <input type="number" value={newBoss.hp} onChange={(e) => setNewBoss((p) => ({ ...p, hp: e.target.value }))} placeholder="HP" />
+              <input type="number" value={newBoss.attack} onChange={(e) => setNewBoss((p) => ({ ...p, attack: e.target.value }))} placeholder="Урон" />
+              <input type="number" value={newBoss.defense} onChange={(e) => setNewBoss((p) => ({ ...p, defense: e.target.value }))} placeholder="Защита" />
+              <button onClick={createBossFromAdmin}>Создать босса</button>
             </div>
           </section>
 
@@ -696,7 +813,7 @@ export function App() {
             <h3>Предметы</h3>
             <div className="grant-controls">
               <select value={selectedGrantUserId} onChange={(e) => setSelectedGrantUserId(e.target.value)}>
-                {adminUsers.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+                {adminUsers.filter((u) => u.role === 'player').map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
               </select>
               <input type="number" min={1} value={grantQuantity} onChange={(e) => setGrantQuantity(e.target.value)} />
             </div>
