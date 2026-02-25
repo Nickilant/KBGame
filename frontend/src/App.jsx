@@ -45,11 +45,62 @@ export function App() {
   const [commentDraft, setCommentDraft] = useState('')
   const [showCommentEmoji, setShowCommentEmoji] = useState(false)
   const commentsRef = useRef(null)
+  const profileAvatarInputRef = useRef(null)
+
+  const [profileAvatar, setProfileAvatar] = useState(localStorage.getItem('profile_avatar') || '')
+  const [equippedItems, setEquippedItems] = useState({
+    weapon: null,
+    shield: null,
+    helmet: null,
+    armor: null,
+    boots: null,
+    amulet: null,
+    ring1: null,
+    ring2: null,
+  })
+  const [inventory, setInventory] = useState([
+    { id: 'w1', name: 'Клинок Бури', slot: 'weapon', rarity: 'Эпик', bonuses: { damage: 12, accuracy: 4 } },
+    { id: 's1', name: 'Щит Клятвы', slot: 'shield', rarity: 'Редкий', bonuses: { defense: 9, hp: 18 } },
+    { id: 'h1', name: 'Шлем Сокола', slot: 'helmet', rarity: 'Редкий', bonuses: { defense: 5, accuracy: 3 } },
+    { id: 'a1', name: 'Латы Дозорного', slot: 'armor', rarity: 'Эпик', bonuses: { defense: 14, hp: 36 } },
+    { id: 'b1', name: 'Сапоги Ветра', slot: 'boots', rarity: 'Редкий', bonuses: { speed: 7 } },
+    { id: 'am1', name: 'Амулет Стужи', slot: 'amulet', rarity: 'Эпик', bonuses: { hp: 14, accuracy: 2 } },
+    { id: 'r1', name: 'Кольцо Силы', slot: 'ring', rarity: 'Обычный', bonuses: { damage: 4 } },
+    { id: 'r2', name: 'Кольцо Стража', slot: 'ring', rarity: 'Обычный', bonuses: { defense: 3 } },
+    { id: 'r3', name: 'Кольцо Охотника', slot: 'ring', rarity: 'Редкий', bonuses: { accuracy: 3, speed: 2 } },
+  ])
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const isBoss = me?.role === 'boss'
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId)
   const canManageSelectedRoom = !!selectedRoom?.can_manage
+  const level = me?.level || 1
+  const currentXp = ((level * 37) % 100) + 1
+  const xpToNext = 100
+  const equippedItemsList = useMemo(() => Object.values(equippedItems).filter(Boolean), [equippedItems])
+  const totalBonuses = useMemo(() => equippedItemsList.reduce((acc, item) => {
+    Object.entries(item.bonuses || {}).forEach(([key, value]) => {
+      acc[key] = (acc[key] || 0) + value
+    })
+    return acc
+  }, {}), [equippedItemsList])
+  const profileStats = {
+    hp: (me?.hp || 0) + (totalBonuses.hp || 0),
+    damage: (me?.attack || 0) + (totalBonuses.damage || 0),
+    defense: (me?.defense || 0) + (totalBonuses.defense || 0),
+    accuracy: 78 + (totalBonuses.accuracy || 0),
+    speed: 1.15 + ((totalBonuses.speed || 0) / 100),
+  }
+  const equipmentSlots = [
+    { key: 'weapon', label: 'Оружие', accepted: 'weapon' },
+    { key: 'shield', label: 'Щит', accepted: 'shield' },
+    { key: 'helmet', label: 'Шлем', accepted: 'helmet' },
+    { key: 'armor', label: 'Броня', accepted: 'armor' },
+    { key: 'boots', label: 'Обувь', accepted: 'boots' },
+    { key: 'amulet', label: 'Амулет', accepted: 'amulet' },
+    { key: 'ring1', label: 'Кольцо I', accepted: 'ring' },
+    { key: 'ring2', label: 'Кольцо II', accepted: 'ring' },
+  ]
 
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
@@ -355,6 +406,35 @@ export function App() {
     }
   }
 
+  const updateProfileAvatar = async (file) => {
+    const uploaded = await uploadMedia(file)
+    setProfileAvatar(uploaded.url)
+    localStorage.setItem('profile_avatar', uploaded.url)
+  }
+
+  const equipItem = (item) => {
+    const targetSlot = item.slot === 'ring'
+      ? (!equippedItems.ring1 ? 'ring1' : (!equippedItems.ring2 ? 'ring2' : 'ring1'))
+      : item.slot
+
+    setEquippedItems((prev) => {
+      const previousInSlot = prev[targetSlot]
+      const nextEquipped = { ...prev, [targetSlot]: item }
+      if (previousInSlot) {
+        setInventory((invPrev) => [...invPrev, previousInSlot])
+      }
+      return nextEquipped
+    })
+    setInventory((prev) => prev.filter((invItem) => invItem.id !== item.id))
+  }
+
+  const unequipItem = (slotKey) => {
+    const item = equippedItems[slotKey]
+    if (!item) return
+    setInventory((prev) => [...prev, item])
+    setEquippedItems((prev) => ({ ...prev, [slotKey]: null }))
+  }
+
 
   if (!token) {
     return <div className="auth-page"><form className="auth-card card" onSubmit={authMode === 'login' ? login : register}><h1>{authMode === 'login' ? 'Вход' : 'Регистрация'}</h1>{authError && <div className="auth-error">{authError}</div>}<input name="username" placeholder="Логин" required /><input name="password" type="password" placeholder="Пароль" required />{authMode === 'register' && <input name="confirmPassword" type="password" placeholder="Повторите пароль" required />}<button type="submit">{authMode === 'login' ? 'Войти' : 'Создать аккаунт'}</button><button type="button" className="link-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Вход'}</button></form></div>
@@ -365,10 +445,10 @@ export function App() {
       <header className="topbar card">
         <h1>KB Raid Arena</h1>
         <nav className="tabs">
-          <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
-          <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
           <button onClick={() => setActiveTab('profile')} className={activeTab === 'profile' ? 'tab active' : 'tab'}>Профиль</button>
           <button onClick={() => setActiveTab('boss')} className={activeTab === 'boss' ? 'tab active' : 'tab'}>БоссБатл</button>
+          <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
+          <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
         </nav>
       </header>
 
@@ -449,7 +529,77 @@ export function App() {
           </aside>
         </main>
       )}
-      {activeTab === 'profile' && <main className="card"><h2>Профиль</h2><p>{me.username} ({me.role})</p></main>}
+      {activeTab === 'profile' && (
+        <main className="profile-page card">
+          <section className="profile-overview card">
+            <div className="avatar-wrap">
+              <img
+                className="profile-avatar"
+                src={profileAvatar ? `${api.defaults.baseURL}${profileAvatar}` : 'https://placehold.co/180x180/171d2f/ffffff?text=RPG'}
+                alt="Аватар"
+              />
+              <button type="button" onClick={() => profileAvatarInputRef.current?.click()}>Сменить аватар</button>
+              <input
+                type="file"
+                ref={profileAvatarInputRef}
+                style={{ display: 'none' }}
+                accept="image/*"
+                onChange={async (e) => e.target.files?.[0] && updateProfileAvatar(e.target.files[0])}
+              />
+            </div>
+            <div className="profile-main">
+              <h2>{me.username}</h2>
+              <p className="role-chip">{me.role === 'boss' ? 'Лорд Рейда' : 'Искатель приключений'}</p>
+              <div className="level-row">
+                <span>Уровень {level}</span>
+                <span>{currentXp}/{xpToNext} XP</span>
+              </div>
+              <div className="xp-bar"><div style={{ width: `${Math.min(100, (currentXp / xpToNext) * 100)}%` }} /></div>
+              <div className="stat-grid">
+                <div><span>Здоровье</span><b>{profileStats.hp}</b></div>
+                <div><span>Урон</span><b>{profileStats.damage}</b></div>
+                <div><span>Защита</span><b>{profileStats.defense}</b></div>
+                <div><span>Точность</span><b>{profileStats.accuracy}%</b></div>
+                <div><span>Скорость атаки</span><b>{profileStats.speed.toFixed(2)}x</b></div>
+              </div>
+            </div>
+          </section>
+
+          <section className="equipment-panel card">
+            <h3>Снаряжение</h3>
+            <div className="equipment-grid">
+              {equipmentSlots.map((slot) => {
+                const item = equippedItems[slot.key]
+                return (
+                  <button key={slot.key} className={`equipment-slot ${item ? 'filled' : ''}`} onClick={() => item && unequipItem(slot.key)}>
+                    <span>{slot.label}</span>
+                    <strong>{item ? item.name : 'Пусто'}</strong>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          <section className="inventory-panel card">
+            <h3>Инвентарь</h3>
+            <div className="inventory-list">
+              {inventory.length === 0 && <p className="inventory-empty">Снаряжение закончилось — снимите что-нибудь из слотов.</p>}
+              {inventory.map((item) => (
+                <article key={item.id} className="inventory-item">
+                  <div>
+                    <h4>{item.name}</h4>
+                    <p>{item.rarity} • {item.slot === 'ring' ? 'Кольцо' : item.slot}</p>
+                    <small>
+                      {Object.entries(item.bonuses).map(([key, value]) => `${key === 'hp' ? 'HP' : key === 'damage' ? 'Урон' : key === 'defense' ? 'Защита' : key === 'accuracy' ? 'Точность' : 'Скорость'} +${value}`).join(' · ')}
+                    </small>
+                  </div>
+                  <button onClick={() => equipItem(item)}>Экипировать</button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </main>
+      )}
       {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
