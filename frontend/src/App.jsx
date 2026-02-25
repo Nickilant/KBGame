@@ -27,6 +27,16 @@ export function App() {
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
+  const [chatError, setChatError] = useState('')
+  const [invites, setInvites] = useState([])
+  const [showRoomModal, setShowRoomModal] = useState(false)
+  const [newRoomName, setNewRoomName] = useState('')
+  const [newRoomAvatar, setNewRoomAvatar] = useState('')
+  const [inviteUsername, setInviteUsername] = useState('')
+  const [roomRules, setRoomRules] = useState([])
+  const [ruleUserId, setRuleUserId] = useState('')
+  const [ruleCooldown, setRuleCooldown] = useState(0)
+  const [ruleCanMedia, setRuleCanMedia] = useState(true)
 
   const [commentModalPost, setCommentModalPost] = useState(null)
   const [comments, setComments] = useState([])
@@ -36,6 +46,8 @@ export function App() {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const isBoss = me?.role === 'boss'
+  const selectedRoom = rooms.find((r) => r.id === selectedRoomId)
+  const canManageSelectedRoom = !!selectedRoom?.can_manage
 
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
@@ -62,7 +74,7 @@ export function App() {
     const meResp = await api.get('/api/me', { headers })
     setMe(meResp.data)
     await loadChannels()
-    const { data: roomData } = await api.get('/api/rooms')
+    const { data: roomData } = await api.get('/api/rooms', { headers })
     setRooms(roomData)
     if (roomData.length) setSelectedRoomId((roomData.find((r) => r.name === 'global') || roomData[0]).id)
   }
@@ -80,8 +92,18 @@ export function App() {
 
   useEffect(() => {
     if (!token || !selectedRoomId) return
-    api.get(`/api/chat/messages/${selectedRoomId}`).then((r) => setChat(r.data))
-  }, [token, selectedRoomId])
+    api.get(`/api/chat/messages/${selectedRoomId}`, { headers }).then((r) => setChat(r.data))
+  }, [token, selectedRoomId, headers])
+
+  useEffect(() => {
+    if (!token) return
+    api.get('/api/rooms/invites', { headers }).then((r) => setInvites(r.data))
+  }, [token, headers])
+
+  useEffect(() => {
+    if (!token || !selectedRoomId || !canManageSelectedRoom) return
+    api.get(`/api/rooms/${selectedRoomId}/rules`, { headers }).then((r) => setRoomRules(r.data))
+  }, [token, selectedRoomId, canManageSelectedRoom, headers])
 
   const login = async (e) => {
     e.preventDefault()
@@ -190,9 +212,62 @@ export function App() {
 
   const sendMessage = async () => {
     if (!selectedRoomId || !message.trim()) return
-    const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message }, { headers })
-    setChat((prev) => [...prev, data])
-    setMessage('')
+    setChatError('')
+    try {
+      const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message }, { headers })
+      setChat((prev) => [...prev, data])
+      setMessage('')
+    } catch (err) {
+      setChatError(err.response?.data?.detail || 'Не удалось отправить сообщение')
+    }
+  }
+
+  const createRoom = async () => {
+    if (!newRoomName.trim()) return
+    await api.post('/api/rooms', { name: newRoomName, avatar_url: newRoomAvatar }, { headers })
+    setNewRoomName('')
+    setNewRoomAvatar('')
+    setShowRoomModal(false)
+    await loadBase()
+  }
+
+  const deleteRoom = async (roomId) => {
+    await api.delete(`/api/rooms/${roomId}`, { headers })
+    await loadBase()
+  }
+
+  const saveRoomSettings = async () => {
+    if (!selectedRoomId) return
+    await api.patch(`/api/rooms/${selectedRoomId}`, { allow_media: selectedRoom.allow_media }, { headers })
+    await loadBase()
+  }
+
+  const inviteToRoom = async () => {
+    if (!selectedRoomId || !inviteUsername.trim()) return
+    await api.post(`/api/rooms/${selectedRoomId}/invites`, { username: inviteUsername }, { headers })
+    setInviteUsername('')
+  }
+
+  const respondInvite = async (inviteId, action) => {
+    await api.post(`/api/rooms/invites/${inviteId}`, { action }, { headers })
+    const [roomsResp, invitesResp] = await Promise.all([
+      api.get('/api/rooms', { headers }),
+      api.get('/api/rooms/invites', { headers }),
+    ])
+    setRooms(roomsResp.data)
+    setInvites(invitesResp.data)
+  }
+
+  const removeMessage = async (id) => {
+    await api.delete(`/api/chat/messages/${id}`, { headers })
+    setChat((prev) => prev.filter((m) => m.id !== id))
+  }
+
+  const setRule = async () => {
+    if (!selectedRoomId || !ruleUserId) return
+    await api.patch(`/api/rooms/${selectedRoomId}/rules`, { user_id: Number(ruleUserId), cooldown_seconds: Number(ruleCooldown), can_attach_media: ruleCanMedia }, { headers })
+    const { data } = await api.get(`/api/rooms/${selectedRoomId}/rules`, { headers })
+    setRoomRules(data)
   }
 
   if (!token) {
@@ -244,7 +319,53 @@ export function App() {
         </main>
       )}
 
-      {activeTab === 'chat' && <main className="chat-page card"><h2>Чат</h2><div className="chat-rooms">{rooms.map((r) => <button key={r.id} className={selectedRoomId === r.id ? 'tab active' : 'tab'} onClick={() => setSelectedRoomId(r.id)}>{r.name}</button>)}</div><div className="chat-box">{chat.map((m, i) => <div key={m.id || i}>{m.content}</div>)}</div><div className="chat-input"><input value={message} onChange={(e) => setMessage(e.target.value)} /><button onClick={sendMessage}>Отправить</button></div></main>}
+      {activeTab === 'chat' && (
+        <main className="chat-layout card">
+          <aside className="channels-sidebar">
+            <div className="channels-header">Чаты <span>|</span><button onClick={() => setShowRoomModal(true)} className="add-channel-btn">+</button></div>
+            <div className="channels-list">
+              {rooms.map((r) => (
+                <button key={r.id} className={`channel-item ${selectedRoomId === r.id ? 'active' : ''}`} onClick={() => setSelectedRoomId(r.id)}>
+                  <img src={r.avatar_url ? `${api.defaults.baseURL}${r.avatar_url}` : 'https://placehold.co/40x40/1f2433/ffffff?text=C'} alt={r.name} />
+                  <div className="channel-main"><span>{r.name}</span>{r.is_main && <small>main</small>}</div>
+                </button>
+              ))}
+            </div>
+            <div className="chat-invites">
+              <h4>Приглашения</h4>
+              {invites.map((inv) => <div key={inv.id} className="invite-item">{inv.room_name}<button onClick={() => respondInvite(inv.id, 'accept')}>✓</button><button onClick={() => respondInvite(inv.id, 'decline')}>✕</button></div>)}
+            </div>
+          </aside>
+
+          <section className="posts-column">
+            <section className="posts-scroll-block chat-box">
+              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b>#{m.user_id}</b>: {m.content} {m.media_url && <a href={`${api.defaults.baseURL}${m.media_url}`} target="_blank">медиа</a>} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
+            </section>
+            <div className="chat-input">
+              <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
+              <button onClick={sendMessage}>Отправить</button>
+            </div>
+            {chatError && <div className="auth-error">{chatError}</div>}
+          </section>
+
+          <aside className="chat-settings card">
+            <h3>Настройки чата</h3>
+            {selectedRoom && canManageSelectedRoom ? <>
+              <label><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => setRooms((prev) => prev.map((r) => r.id === selectedRoom.id ? { ...r, allow_media: e.target.checked } : r))} /> Разрешить медиа</label>
+              <button onClick={saveRoomSettings}>Сохранить</button>
+              <input value={inviteUsername} onChange={(e) => setInviteUsername(e.target.value)} placeholder="username для приглашения" />
+              <button onClick={inviteToRoom}>Пригласить</button>
+              {!selectedRoom.is_main && <button onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
+              <h4>Правила пользователя</h4>
+              <input value={ruleUserId} onChange={(e) => setRuleUserId(e.target.value)} placeholder="ID пользователя" />
+              <input type="number" value={ruleCooldown} onChange={(e) => setRuleCooldown(e.target.value)} placeholder="Cooldown (sec)" />
+              <label><input type="checkbox" checked={ruleCanMedia} onChange={(e) => setRuleCanMedia(e.target.checked)} /> Медиа разрешено</label>
+              <button onClick={setRule}>Применить правило</button>
+              <div>{roomRules.map((r) => <div key={r.id}>#{r.user_id} {r.username}: {r.cooldown_seconds}s / media:{r.can_attach_media ? 'on' : 'off'}</div>)}</div>
+            </> : <p>Недостаточно прав для настройки.</p>}
+          </aside>
+        </main>
+      )}
       {activeTab === 'profile' && <main className="card"><h2>Профиль</h2><p>{me.username} ({me.role})</p></main>}
       {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
 

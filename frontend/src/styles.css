@@ -57,3 +57,11 @@
 .link-btn{background:transparent;border:0;text-decoration:underline;color:#9db7ff}
 
 @media (max-width:960px){.feed-page{grid-template-columns:1fr}.post-shell{width:100%;padding-right:0}.tg-post{width:100%}.hover-reactions-vertical{right:8px}.app-shell{padding:8px 8px 20px}.channels-sidebar{max-height:220px}}
+
+.chat-layout{display:grid;grid-template-columns:280px 1fr 290px;gap:10px;flex:1;min-height:0;padding:0;border-radius:0;overflow:hidden}
+.chat-settings{border:1px solid #3a4460;background:#121726;display:flex;flex-direction:column;gap:8px;border-radius:0}
+.chat-settings input{width:100%;background:#111623;color:#fff;border:1px solid #3a4460;padding:8px;border-radius:8px}
+.chat-invites{padding:10px;border-top:1px solid #3a4460;display:grid;gap:6px}
+.invite-item{display:flex;align-items:center;gap:6px;justify-content:space-between;background:#1a2030;padding:6px;border-radius:8px}
+.chat-message{padding:8px;border-bottom:1px solid #2a3248;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+@media (max-width:960px){.chat-layout{grid-template-columns:1fr}.chat-settings{order:3}}
