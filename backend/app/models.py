@@ -40,10 +40,15 @@ class Item(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(128), nullable=False)
+    description = Column(Text, default="")
     rarity = Column(String(32), nullable=False)
+    hp_bonus = Column(Integer, default=0)
     attack_bonus = Column(Integer, default=0)
     defense_bonus = Column(Integer, default=0)
+    accuracy_bonus = Column(Integer, default=0)
+    attack_speed_bonus = Column(Float, default=0)
     image_url = Column(String(255), default="")
+    unique_skill = Column(String(255), nullable=True)
     drop_chance = Column(Float, default=0.1)
 
 

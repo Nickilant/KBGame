@@ -1,10 +1,14 @@
-:root { color-scheme: dark; --bg:#10121a; --card:#1b1f2b; --border:#30384c; --accent:#5b8cff; }
+:root { color-scheme: dark; --bg:#10121a; --card:#1b1f2b; --border:#30384c; --accent:#5b8cff; --gold:#e0b15e; }
 *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui;background:var(--bg);color:#eef3ff;overflow:hidden}
 .app-shell{max-width:1180px;margin:0 auto;padding:12px 12px 20px;height:100dvh;display:flex;flex-direction:column;gap:10px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
-.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:0;flex:0 0 auto}
-.tabs{display:flex;gap:8px;flex-wrap:wrap}.tab,button{background:#2a3144;border:1px solid #3a4460;color:#fff;padding:8px 10px;border-radius:9px;cursor:pointer}
-.tab.active{background:var(--accent)}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:0;flex:0 0 auto;background:linear-gradient(160deg,#1b2133,#131a2c);border-color:#414d72;box-shadow:0 10px 28px rgba(0,0,0,.35)}
+.topbar h1{margin:0;font-size:20px;letter-spacing:.5px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;padding:4px;background:#0e1424;border:1px solid #2f3a59;border-radius:999px}
+.tab,button{background:#2a3144;border:1px solid #3a4460;color:#fff;padding:8px 10px;border-radius:9px;cursor:pointer}
+.tab{background:transparent;border:0;padding:9px 16px;border-radius:999px;color:#9eb4f8;font-weight:600;transition:.2s}
+.tab:hover{background:#1f2944;color:#fff}
+.tab.active{background:linear-gradient(160deg,#5b8cff,#7f71ff);color:#fff;box-shadow:0 8px 22px rgba(91,140,255,.35)}
 
 .feed-page{display:grid;grid-template-columns:280px 1fr;gap:10px;flex:1;min-height:0;padding:0;border-radius:0;overflow:hidden}
 .channels-sidebar{border:1px solid #3a4460;background:#121726;overflow:hidden;display:flex;flex-direction:column}
@@ -101,3 +105,50 @@
 .chat-inline-image{max-width:180px;max-height:140px;display:block;border:1px solid #3a4460}
 
 .chat-members{margin-top:6px;border:1px solid #3a4460;background:#111623;max-height:180px;overflow:auto}.chat-members-title{padding:6px 8px;border-bottom:1px solid #3a4460;font-size:12px;color:#aab4d2}.chat-member-item{padding:6px 8px;border-bottom:1px solid #2a3248}.chat-member-item:last-child{border-bottom:0}
+
+.profile-page{flex:1;min-height:0;display:grid;grid-template-columns:1.15fr .85fr;grid-template-areas:"overview equipment" "inventory abilities";gap:10px;padding:0;border-radius:0;overflow:hidden}
+.profile-overview{grid-area:overview;display:grid;grid-template-columns:220px 1fr;gap:14px;border-radius:0;background:radial-gradient(circle at top left,#222b44,#151b2c)}
+.avatar-wrap{display:grid;align-content:start;gap:8px}.profile-avatar{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;border:2px solid #4f5f86;box-shadow:0 0 0 3px rgba(224,177,94,.2)}
+.profile-main h2{margin:0 0 4px 0}.role-chip{display:inline-flex;margin:0 0 12px 0;padding:4px 10px;border-radius:999px;background:#2b3452;color:#d9e5ff;font-size:13px}
+.level-row{display:flex;justify-content:space-between;font-weight:700;color:#dbe5ff}
+.xp-bar{height:12px;background:#0e1424;border:1px solid #425078;border-radius:999px;overflow:hidden;margin:8px 0 12px}.xp-bar div{height:100%;background:linear-gradient(90deg,#49d17a,var(--gold))}
+.stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat-grid div{padding:10px;border:1px solid #374568;background:#10172a;border-radius:10px;display:grid;gap:3px}.stat-grid span{font-size:12px;color:#a8b6d8}.stat-grid b{font-size:18px}
+
+.equipment-panel{grid-area:equipment;border-radius:0;background:linear-gradient(180deg,#151d32,#11182b)}
+.equipment-panel h3,.inventory-panel h3{margin:0 0 12px 0}
+.equipment-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.equipment-slot{display:grid;text-align:left;gap:4px;padding:10px;border-radius:10px;background:#10172a;border:1px dashed #4b5880}
+.equipment-slot span{font-size:12px;color:#9aabd8}.equipment-slot strong{font-size:13px;line-height:1.3}.equipment-slot.filled{border-style:solid;border-color:#6278b5;background:#19233b}
+
+.inventory-panel{grid-area:inventory;border-radius:0;background:#141c30}
+.inventory-list{display:grid;gap:8px;max-height:320px;overflow:auto;padding-right:4px}
+.inventory-item{display:flex;justify-content:space-between;gap:8px;padding:10px;border:1px solid #344160;background:#0f1729;border-radius:10px}
+.inventory-item h4{margin:0 0 2px 0}.inventory-item p{margin:0 0 4px 0;color:#9fb0db;font-size:13px}.inventory-item small{color:#c8d4f3;font-size:12px}
+.inventory-item button{align-self:center;white-space:nowrap;background:#2f5fe6;border-color:#5178ee}
+.inventory-empty{margin:0;padding:16px;border:1px dashed #3e4b72;border-radius:10px;color:#9eb0de}
+.abilities-panel{grid-area:abilities;border-radius:0;background:#141c30}
+.abilities-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.ability-slot{padding:10px;border:1px dashed #45527a;border-radius:10px;background:#0f1729;display:grid;gap:4px}
+.ability-slot span{font-size:12px;color:#9db0dd}.ability-slot strong{font-size:13px}
+
+.admin-page{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0;border-radius:0;overflow:hidden;align-content:start}
+.admin-item-form{display:grid;gap:8px}
+.admin-item-form label{font-size:12px;color:#9fb0db}
+.admin-item-form input,.grant-controls select,.grant-controls input{width:100%;background:#111623;color:#fff;border:1px solid #3a4460;padding:10px;border-radius:8px}
+.admin-items-list{display:flex;flex-direction:column;min-height:0}
+.admin-item-list{display:grid;gap:8px;overflow:auto;padding-right:4px}
+.admin-item-row{display:grid;grid-template-columns:56px 1fr auto;gap:10px;padding:10px;border:1px solid #344160;background:#0f1729;border-radius:10px;align-items:start}
+.admin-item-row img{width:56px;height:56px;border-radius:8px;object-fit:cover}
+.admin-item-row h4{margin:0 0 4px 0}.admin-item-row p{margin:0 0 4px 0;color:#cdd8f5;font-size:13px}.admin-item-row small{display:block;color:#9fb0db;font-size:12px}
+.grant-controls{display:grid;grid-template-columns:1fr 100px;gap:8px;margin-bottom:10px}
+.admin-users-panel,.admin-boss-panel{grid-column:span 1}
+.admin-users-list{display:grid;gap:8px;max-height:320px;overflow:auto}
+.admin-user-row{padding:10px;border:1px solid #344160;background:#0f1729;border-radius:10px;display:grid;gap:8px}
+.admin-user-head{display:flex;justify-content:space-between;align-items:center}
+.admin-user-head small{color:#9fb0db}
+.admin-user-controls{display:grid;grid-template-columns:160px repeat(5,1fr);gap:6px}
+.admin-user-controls select,.admin-user-controls input,.admin-boss-form input{width:100%;background:#111623;color:#fff;border:1px solid #3a4460;padding:8px;border-radius:8px}
+.admin-user-actions{display:flex;gap:8px}
+.admin-boss-form{display:grid;grid-template-columns:1.2fr repeat(3,.6fr) auto;gap:8px}
+
+@media (max-width:960px){.profile-page{grid-template-columns:1fr;grid-template-areas:"overview" "equipment" "abilities" "inventory"}.profile-overview{grid-template-columns:1fr}.admin-page{grid-template-columns:1fr}.admin-user-controls{grid-template-columns:1fr}.admin-boss-form{grid-template-columns:1fr}}

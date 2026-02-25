@@ -9,7 +9,7 @@ export function App() {
   const [authMode, setAuthMode] = useState('login')
   const [authError, setAuthError] = useState('')
 
-  const [activeTab, setActiveTab] = useState('feed')
+  const [activeTab, setActiveTab] = useState('profile')
   const [me, setMe] = useState(null)
   const [posts, setPosts] = useState([])
   const [channels, setChannels] = useState([])
@@ -45,11 +45,71 @@ export function App() {
   const [commentDraft, setCommentDraft] = useState('')
   const [showCommentEmoji, setShowCommentEmoji] = useState(false)
   const commentsRef = useRef(null)
+  const profileAvatarInputRef = useRef(null)
+
+  const [profileAvatar, setProfileAvatar] = useState(localStorage.getItem('profile_avatar') || '')
+  const [equippedItems, setEquippedItems] = useState({
+    weapon: null,
+    shield: null,
+    helmet: null,
+    armor: null,
+    boots: null,
+    amulet: null,
+    ring1: null,
+    ring2: null,
+  })
+  const [inventory, setInventory] = useState([])
+  const [uniqueAbilities] = useState(Array(10).fill(null))
+  const [adminUsers, setAdminUsers] = useState([])
+  const [adminItems, setAdminItems] = useState([])
+  const [adminUserDrafts, setAdminUserDrafts] = useState({})
+  const [newBoss, setNewBoss] = useState({ name: '', hp: 1000, attack: 40, defense: 15 })
+  const [selectedGrantUserId, setSelectedGrantUserId] = useState('')
+  const [grantQuantity, setGrantQuantity] = useState(1)
+  const [newItem, setNewItem] = useState({
+    image_url: '',
+    name: '',
+    description: '',
+    hp_bonus: 0,
+    attack_bonus: 0,
+    defense_bonus: 0,
+    accuracy_bonus: 0,
+    attack_speed_bonus: 0,
+    unique_skill: '',
+  })
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const isBoss = me?.role === 'boss'
   const selectedRoom = rooms.find((r) => r.id === selectedRoomId)
   const canManageSelectedRoom = !!selectedRoom?.can_manage
+  const isAdmin = me?.role === 'admin' || me?.role === 'master_admin'
+  const level = me?.level || 1
+  const currentXp = 0
+  const xpToNext = 100
+  const equippedItemsList = useMemo(() => Object.values(equippedItems).filter(Boolean), [equippedItems])
+  const totalBonuses = useMemo(() => equippedItemsList.reduce((acc, item) => {
+    Object.entries(item.bonuses || {}).forEach(([key, value]) => {
+      acc[key] = (acc[key] || 0) + value
+    })
+    return acc
+  }, {}), [equippedItemsList])
+  const profileStats = {
+    hp: 100 + (totalBonuses.hp || 0),
+    damage: 20 + (totalBonuses.damage || 0),
+    defense: 5 + (totalBonuses.defense || 0),
+    accuracy: 40 + (totalBonuses.accuracy || 0),
+    speed: 1 + ((totalBonuses.speed || 0) / 100),
+  }
+  const equipmentSlots = [
+    { key: 'weapon', label: 'Оружие', accepted: 'weapon' },
+    { key: 'shield', label: 'Щит', accepted: 'shield' },
+    { key: 'helmet', label: 'Шлем', accepted: 'helmet' },
+    { key: 'armor', label: 'Броня', accepted: 'armor' },
+    { key: 'boots', label: 'Обувь', accepted: 'boots' },
+    { key: 'amulet', label: 'Амулет', accepted: 'amulet' },
+    { key: 'ring1', label: 'Кольцо I', accepted: 'ring' },
+    { key: 'ring2', label: 'Кольцо II', accepted: 'ring' },
+  ]
 
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
@@ -85,6 +145,8 @@ export function App() {
   const loadBase = async () => {
     const meResp = await api.get('/api/me', { headers })
     setMe(meResp.data)
+    const inventoryResp = await api.get('/api/inventory', { headers })
+    setInventory(inventoryResp.data)
     await loadChannels()
     await loadRooms()
   }
@@ -355,6 +417,148 @@ export function App() {
     }
   }
 
+  const updateProfileAvatar = async (file) => {
+    const uploaded = await uploadMedia(file)
+    setProfileAvatar(uploaded.url)
+    localStorage.setItem('profile_avatar', uploaded.url)
+  }
+
+  const equipItem = (item) => {
+    const normalized = {
+      ...item,
+      bonuses: {
+        hp: item.hp_bonus || item.bonuses?.hp || 0,
+        damage: item.attack_bonus || item.bonuses?.damage || 0,
+        defense: item.defense_bonus || item.bonuses?.defense || 0,
+        accuracy: item.accuracy_bonus || item.bonuses?.accuracy || 0,
+        speed: item.attack_speed_bonus || item.bonuses?.speed || 0,
+      },
+    }
+    const targetSlot = item.slot === 'ring'
+      ? (!equippedItems.ring1 ? 'ring1' : (!equippedItems.ring2 ? 'ring2' : 'ring1'))
+      : (item.slot || 'weapon')
+
+    setEquippedItems((prev) => {
+      const previousInSlot = prev[targetSlot]
+      const nextEquipped = { ...prev, [targetSlot]: normalized }
+      if (previousInSlot) {
+        setInventory((invPrev) => [...invPrev, previousInSlot])
+      }
+      return nextEquipped
+    })
+    setInventory((prev) => prev.filter((invItem, idx) => (invItem.id !== item.id) || idx !== prev.findIndex((x) => x.id === item.id)))
+  }
+
+  const unequipItem = (slotKey) => {
+    const item = equippedItems[slotKey]
+    if (!item) return
+    setInventory((prev) => [...prev, item])
+    setEquippedItems((prev) => ({ ...prev, [slotKey]: null }))
+  }
+
+  const loadAdminPanel = async () => {
+    const [usersResp, itemsResp] = await Promise.all([
+      api.get('/api/master-admin/users', { headers }),
+      api.get('/api/master-admin/items', { headers }),
+    ])
+    setAdminUsers(usersResp.data)
+    setAdminItems(itemsResp.data)
+    setAdminUserDrafts((prev) => {
+      const next = { ...prev }
+      usersResp.data.forEach((u) => {
+        next[u.id] = {
+          role: prev[u.id]?.role ?? u.role,
+          hp: prev[u.id]?.hp ?? u.hp,
+          attack: prev[u.id]?.attack ?? u.attack,
+          defense: prev[u.id]?.defense ?? u.defense,
+          level: prev[u.id]?.level ?? u.level,
+          gold: prev[u.id]?.gold ?? u.gold,
+        }
+      })
+      return next
+    })
+    if (!selectedGrantUserId && usersResp.data.length) {
+      setSelectedGrantUserId(String(usersResp.data[0].id))
+    }
+  }
+
+  const createAdminItem = async () => {
+    await api.post('/api/master-admin/items', {
+      ...newItem,
+      unique_skill: (newItem.unique_skill || '').trim() || null,
+      attack_speed_bonus: Number(newItem.attack_speed_bonus || 0),
+      hp_bonus: Number(newItem.hp_bonus || 0),
+      attack_bonus: Number(newItem.attack_bonus || 0),
+      defense_bonus: Number(newItem.defense_bonus || 0),
+      accuracy_bonus: Number(newItem.accuracy_bonus || 0),
+    }, { headers })
+    setNewItem({ image_url: '', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
+    await loadAdminPanel()
+  }
+
+  const grantItemToUser = async (itemId) => {
+    if (!selectedGrantUserId) return
+    await api.post(`/api/master-admin/items/${itemId}/grant`, {
+      user_id: Number(selectedGrantUserId),
+      quantity: Math.max(1, Number(grantQuantity || 1)),
+    }, { headers })
+    await loadAdminPanel()
+  }
+
+  const updateAdminUserDraft = (userId, field, value) => {
+    setAdminUserDrafts((prev) => ({
+      ...prev,
+      [userId]: {
+        role: prev[userId]?.role ?? 'player',
+        hp: prev[userId]?.hp ?? 100,
+        attack: prev[userId]?.attack ?? 20,
+        defense: prev[userId]?.defense ?? 5,
+        level: prev[userId]?.level ?? 1,
+        gold: prev[userId]?.gold ?? 0,
+        ...prev[userId],
+        [field]: value,
+      },
+    }))
+  }
+
+  const applyAdminUserChanges = async (userId) => {
+    const draft = adminUserDrafts[userId]
+    if (!draft) return
+    await api.patch(`/api/master-admin/users/${userId}/role`, { role: draft.role }, { headers })
+    await api.patch(`/api/master-admin/users/${userId}/stats`, {
+      hp: Number(draft.hp),
+      attack: Number(draft.attack),
+      defense: Number(draft.defense),
+      level: Number(draft.level),
+      gold: Number(draft.gold),
+    }, { headers })
+    await loadAdminPanel()
+  }
+
+  const toggleUserBan = async (userId, isBanned) => {
+    await api.patch(`/api/master-admin/users/${userId}/ban`, { is_banned: !isBanned }, { headers })
+    await loadAdminPanel()
+  }
+
+  const createBossFromAdmin = async () => {
+    if (!newBoss.name.trim()) return
+    await api.post('/api/master-admin/bosses', {
+      name: newBoss.name.trim(),
+      hp: Number(newBoss.hp),
+      attack: Number(newBoss.attack),
+      defense: Number(newBoss.defense),
+      abilities: [],
+    }, { headers })
+    setNewBoss({ name: '', hp: 1000, attack: 40, defense: 15 })
+  }
+
+  useEffect(() => {
+    if (!token || !isAdmin) return
+    loadAdminPanel().catch(() => {
+      // noop
+    })
+  }, [token, isAdmin])
+
 
   if (!token) {
     return <div className="auth-page"><form className="auth-card card" onSubmit={authMode === 'login' ? login : register}><h1>{authMode === 'login' ? 'Вход' : 'Регистрация'}</h1>{authError && <div className="auth-error">{authError}</div>}<input name="username" placeholder="Логин" required /><input name="password" type="password" placeholder="Пароль" required />{authMode === 'register' && <input name="confirmPassword" type="password" placeholder="Повторите пароль" required />}<button type="submit">{authMode === 'login' ? 'Войти' : 'Создать аккаунт'}</button><button type="button" className="link-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Вход'}</button></form></div>
@@ -365,10 +569,11 @@ export function App() {
       <header className="topbar card">
         <h1>KB Raid Arena</h1>
         <nav className="tabs">
-          <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
-          <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
           <button onClick={() => setActiveTab('profile')} className={activeTab === 'profile' ? 'tab active' : 'tab'}>Профиль</button>
           <button onClick={() => setActiveTab('boss')} className={activeTab === 'boss' ? 'tab active' : 'tab'}>БоссБатл</button>
+          <button onClick={() => setActiveTab('feed')} className={activeTab === 'feed' ? 'tab active' : 'tab'}>Лента</button>
+          <button onClick={() => setActiveTab('chat')} className={activeTab === 'chat' ? 'tab active' : 'tab'}>Чат</button>
+          {isAdmin && <button onClick={() => setActiveTab('admin')} className={activeTab === 'admin' ? 'tab active' : 'tab'}>Админка</button>}
         </nav>
       </header>
 
@@ -449,8 +654,189 @@ export function App() {
           </aside>
         </main>
       )}
-      {activeTab === 'profile' && <main className="card"><h2>Профиль</h2><p>{me.username} ({me.role})</p></main>}
-      {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
+      {activeTab === 'profile' && me && (
+        <main className="profile-page card">
+          <section className="profile-overview card">
+            <div className="avatar-wrap">
+              <img
+                className="profile-avatar"
+                src={profileAvatar ? `${api.defaults.baseURL}${profileAvatar}` : 'https://placehold.co/180x180/171d2f/ffffff?text=RPG'}
+                alt="Аватар"
+              />
+              <button type="button" onClick={() => profileAvatarInputRef.current?.click()}>Сменить аватар</button>
+              <input
+                type="file"
+                ref={profileAvatarInputRef}
+                style={{ display: 'none' }}
+                accept="image/*"
+                onChange={async (e) => e.target.files?.[0] && updateProfileAvatar(e.target.files[0])}
+              />
+            </div>
+            <div className="profile-main">
+              <h2>{me.username}</h2>
+              <p className="role-chip">{me.role === 'boss' ? 'Лорд Рейда' : 'Искатель приключений'}</p>
+              <div className="level-row">
+                <span>Уровень {level}</span>
+                <span>{currentXp}/{xpToNext} XP</span>
+              </div>
+              <div className="xp-bar"><div style={{ width: `${Math.min(100, (currentXp / xpToNext) * 100)}%` }} /></div>
+              <div className="stat-grid">
+                <div><span>Здоровье</span><b>{profileStats.hp}</b></div>
+                <div><span>Урон</span><b>{profileStats.damage}</b></div>
+                <div><span>Защита</span><b>{profileStats.defense}</b></div>
+                <div><span>Точность</span><b>{profileStats.accuracy}%</b></div>
+                <div><span>Скорость атаки</span><b>{profileStats.speed.toFixed(2)}x</b></div>
+              </div>
+            </div>
+          </section>
+
+          <section className="equipment-panel card">
+            <h3>Снаряжение</h3>
+            <div className="equipment-grid">
+              {equipmentSlots.map((slot) => {
+                const item = equippedItems[slot.key]
+                return (
+                  <button key={slot.key} className={`equipment-slot ${item ? 'filled' : ''}`} onClick={() => item && unequipItem(slot.key)}>
+                    <span>{slot.label}</span>
+                    <strong>{item ? item.name : 'Пусто'}</strong>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          <section className="abilities-panel card">
+            <h3>Уникальные умения</h3>
+            <div className="abilities-grid">
+              {uniqueAbilities.map((ability, idx) => (
+                <div key={idx} className="ability-slot">
+                  <span>Слот {idx + 1}</span>
+                  <strong>{ability?.name || 'Пусто'}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="inventory-panel card">
+            <h3>Инвентарь</h3>
+            <div className="inventory-list">
+              {inventory.length === 0 && <p className="inventory-empty">Инвентарь пуст.</p>}
+              {inventory.map((item) => (
+                <article key={item.id} className="inventory-item">
+                  <div>
+                    <h4>{item.name}</h4>
+                    <p>{item.description || 'Описание появится позже'}</p>
+                    <small>
+                      HP +{item.hp_bonus || 0} · Урон +{item.attack_bonus || 0} · Защита +{item.defense_bonus || 0} · Точность +{item.accuracy_bonus || 0}% · Скорость +{item.attack_speed_bonus || 0}
+                    </small>
+                  </div>
+                  <button onClick={() => equipItem(item)}>Экипировать</button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </main>
+      )}
+      {activeTab === 'admin' && isAdmin && (
+        <main className="admin-page card">
+          <section className="card admin-create-item">
+            <h3>Создание предмета</h3>
+            <div className="admin-item-form">
+              <label>Картинка предмета (URL)</label>
+              <input value={newItem.image_url} placeholder="Картинка (URL)" onChange={(e) => setNewItem((p) => ({ ...p, image_url: e.target.value }))} />
+              <label>Название предмета</label>
+              <input value={newItem.name} placeholder="Название" onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
+              <label>Описание предмета</label>
+              <input value={newItem.description} placeholder="Описание" onChange={(e) => setNewItem((p) => ({ ...p, description: e.target.value }))} />
+              <label>Здоровье (HP) — сколько добавляет к базовому здоровью</label>
+              <input type="number" value={newItem.hp_bonus} placeholder="HP" onChange={(e) => setNewItem((p) => ({ ...p, hp_bonus: e.target.value }))} />
+              <label>Урон — бонус к урону персонажа</label>
+              <input type="number" value={newItem.attack_bonus} placeholder="Урон" onChange={(e) => setNewItem((p) => ({ ...p, attack_bonus: e.target.value }))} />
+              <label>Защита — бонус к защите персонажа</label>
+              <input type="number" value={newItem.defense_bonus} placeholder="Защита" onChange={(e) => setNewItem((p) => ({ ...p, defense_bonus: e.target.value }))} />
+              <label>Точность — бонус к шансу попадания (в %)</label>
+              <input type="number" value={newItem.accuracy_bonus} placeholder="Точность" onChange={(e) => setNewItem((p) => ({ ...p, accuracy_bonus: e.target.value }))} />
+              <label>Скорость атаки — добавка к базовой скорости (например 0.1)</label>
+              <input type="number" step="0.01" value={newItem.attack_speed_bonus} placeholder="Скорость атаки" onChange={(e) => setNewItem((p) => ({ ...p, attack_speed_bonus: e.target.value }))} />
+              <label>Уникальное умение (макс. 1 на предмет, пока в разработке)</label>
+              <input value={newItem.unique_skill} placeholder="Уникальное умение (макс. 1, в разработке)" onChange={(e) => setNewItem((p) => ({ ...p, unique_skill: e.target.value }))} />
+              <button onClick={createAdminItem}>Создать предмет</button>
+            </div>
+          </section>
+
+          <section className="card admin-users-panel">
+            <h3>Управление пользователями (старый функционал)</h3>
+            <div className="admin-users-list">
+              {adminUsers.map((u) => {
+                const draft = adminUserDrafts[u.id] || { role: u.role, hp: u.hp, attack: u.attack, defense: u.defense, level: u.level, gold: u.gold }
+                return (
+                  <article key={u.id} className="admin-user-row">
+                    <div className="admin-user-head">
+                      <strong>{u.username}</strong>
+                      <small>{u.is_banned ? 'Забанен' : 'Активен'}</small>
+                    </div>
+                    <div className="admin-user-controls">
+                      <select value={draft.role} onChange={(e) => updateAdminUserDraft(u.id, 'role', e.target.value)}>
+                        <option value="player">player</option>
+                        <option value="boss">boss</option>
+                        <option value="admin">admin</option>
+                        <option value="master_admin">master_admin</option>
+                      </select>
+                      <input type="number" value={draft.hp} onChange={(e) => updateAdminUserDraft(u.id, 'hp', e.target.value)} placeholder="HP" />
+                      <input type="number" value={draft.attack} onChange={(e) => updateAdminUserDraft(u.id, 'attack', e.target.value)} placeholder="Урон" />
+                      <input type="number" value={draft.defense} onChange={(e) => updateAdminUserDraft(u.id, 'defense', e.target.value)} placeholder="Защита" />
+                      <input type="number" value={draft.level} onChange={(e) => updateAdminUserDraft(u.id, 'level', e.target.value)} placeholder="Уровень" />
+                      <input type="number" value={draft.gold} onChange={(e) => updateAdminUserDraft(u.id, 'gold', e.target.value)} placeholder="Золото" />
+                    </div>
+                    <div className="admin-user-actions">
+                      <button onClick={() => applyAdminUserChanges(u.id)}>Сохранить</button>
+                      <button onClick={() => toggleUserBan(u.id, u.is_banned)}>{u.is_banned ? 'Разбанить' : 'Забанить'}</button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+
+          <section className="card admin-boss-panel">
+            <h3>Создание босса (старый функционал)</h3>
+            <div className="admin-boss-form">
+              <input value={newBoss.name} onChange={(e) => setNewBoss((p) => ({ ...p, name: e.target.value }))} placeholder="Имя босса" />
+              <input type="number" value={newBoss.hp} onChange={(e) => setNewBoss((p) => ({ ...p, hp: e.target.value }))} placeholder="HP" />
+              <input type="number" value={newBoss.attack} onChange={(e) => setNewBoss((p) => ({ ...p, attack: e.target.value }))} placeholder="Урон" />
+              <input type="number" value={newBoss.defense} onChange={(e) => setNewBoss((p) => ({ ...p, defense: e.target.value }))} placeholder="Защита" />
+              <button onClick={createBossFromAdmin}>Создать босса</button>
+            </div>
+          </section>
+
+          <section className="card admin-items-list">
+            <h3>Предметы</h3>
+            <div className="grant-controls">
+              <select value={selectedGrantUserId} onChange={(e) => setSelectedGrantUserId(e.target.value)}>
+                {adminUsers.filter((u) => u.role === 'player').map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+              </select>
+              <input type="number" min={1} value={grantQuantity} onChange={(e) => setGrantQuantity(e.target.value)} />
+            </div>
+            <div className="admin-item-list">
+              {adminItems.map((item) => (
+                <article key={item.id} className="admin-item-row">
+                  <img src={item.image_url || 'https://placehold.co/56x56/131a2c/fff?text=I'} alt={item.name} />
+                  <div>
+                    <h4>{item.name}</h4>
+                    <p>{item.description}</p>
+                    <small>HP +{item.hp_bonus} · Урон +{item.attack_bonus} · Защита +{item.defense_bonus} · Точность +{item.accuracy_bonus}% · Скорость +{item.attack_speed_bonus}</small>
+                    <small>Уникальное умение: {item.unique_skill || 'Нет'} (в разработке)</small>
+                    <small>У игроков: {item.total_instances} шт. / {item.players_owned_count} игроков</small>
+                  </div>
+                  <button onClick={() => grantItemToUser(item.id)}>Выдать</button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </main>
+      )}
+
+            {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
       {showRoomModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый чат</h3><input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Название чата" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewRoomAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowRoomModal(false)}>Отмена</button><button onClick={createRoom}>Создать</button></div></div></div>}
