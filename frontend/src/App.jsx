@@ -71,13 +71,21 @@ export function App() {
     }
   }
 
+  const loadRooms = async () => {
+    const { data: roomData } = await api.get('/api/rooms', { headers })
+    setRooms(roomData)
+    setSelectedRoomId((prev) => {
+      if (!roomData.length) return null
+      if (prev && roomData.some((r) => r.id === prev)) return prev
+      return (roomData.find((r) => r.name === 'global') || roomData[0]).id
+    })
+  }
+
   const loadBase = async () => {
     const meResp = await api.get('/api/me', { headers })
     setMe(meResp.data)
     await loadChannels()
-    const { data: roomData } = await api.get('/api/rooms', { headers })
-    setRooms(roomData)
-    if (roomData.length) setSelectedRoomId((roomData.find((r) => r.name === 'global') || roomData[0]).id)
+    await loadRooms()
   }
 
   useEffect(() => {
@@ -129,6 +137,19 @@ export function App() {
       wsRef.current = null
     }
   }, [token, selectedRoomId])
+
+
+  useEffect(() => {
+    if (!token) return
+    const intervalId = setInterval(async () => {
+      try {
+        await Promise.all([loadChannels(), loadRooms()])
+      } catch {
+        // noop
+      }
+    }, 3000)
+    return () => clearInterval(intervalId)
+  }, [token, headers])
 
   const login = async (e) => {
     e.preventDefault()
@@ -269,12 +290,12 @@ export function App() {
     setNewRoomName('')
     setNewRoomAvatar('')
     setShowRoomModal(false)
-    await loadBase()
+    await loadRooms()
   }
 
   const deleteRoom = async (roomId) => {
     await api.delete(`/api/rooms/${roomId}`, { headers })
-    await loadBase()
+    await loadRooms()
   }
 
   const patchRoomSettings = async (changes) => {
@@ -287,7 +308,7 @@ export function App() {
     if (!joinCodeInput.trim()) return
     await api.get(`/api/rooms/join/${joinCodeInput.trim().toUpperCase()}`, { headers })
     setJoinCodeInput('')
-    await loadBase()
+    await loadRooms()
   }
 
   const removeMessage = async (id) => {
