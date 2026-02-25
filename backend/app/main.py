@@ -74,6 +74,7 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS cooldown_seconds INTEGER DEFAULT 0"))
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS join_code VARCHAR(24)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_rooms_join_code ON rooms(join_code)"))
+        connection.execute(text("ALTER TABLE room_members ADD COLUMN IF NOT EXISTS nickname_color VARCHAR(16) DEFAULT '#9fc5ff'"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(32) DEFAULT ''"))
 
@@ -215,7 +216,7 @@ def init_data():
             global_room.join_code = "GLOBAL"
 
     if not db.query(RoomMember).filter(RoomMember.room_id == global_room.id, RoomMember.user_id == admin.id).first():
-        db.add(RoomMember(room_id=global_room.id, user_id=admin.id))
+        db.add(RoomMember(room_id=global_room.id, user_id=admin.id, nickname_color=_generate_nickname_color()))
 
 
     if not db.query(Boss).first():
@@ -321,9 +322,20 @@ def _generate_join_code(db: Session) -> str:
             return code
     return uuid4().hex[:8].upper()
 
+def _generate_nickname_color() -> str:
+    import colorsys
+    import secrets
+
+    h = secrets.randbelow(360) / 360.0
+    s = 0.32 + (secrets.randbelow(24) / 100.0)
+    v = 0.90 + (secrets.randbelow(8) / 100.0)
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
 def _ensure_room_member(db: Session, room_id: int, user_id: int):
-    if not db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first():
-        db.add(RoomMember(room_id=room_id, user_id=user_id))
+    member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+    if not member:
+        db.add(RoomMember(room_id=room_id, user_id=user_id, nickname_color=_generate_nickname_color()))
 
 
 def _can_manage_room(user: User, room: Room) -> bool:
@@ -343,7 +355,7 @@ def create_room(payload: RoomIn, user: User = Depends(get_current_user), db: Ses
     room = Room(name=name, avatar_url=payload.avatar_url or "", created_by=user.id, is_main=False, join_code=_generate_join_code(db))
     db.add(room)
     db.flush()
-    db.add(RoomMember(room_id=room.id, user_id=user.id))
+    db.add(RoomMember(room_id=room.id, user_id=user.id, nickname_color=_generate_nickname_color()))
     db.commit()
     db.refresh(room)
     return _room_to_dict(room, user)
@@ -455,8 +467,10 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
 
     if media_url and not room.allow_media:
         raise HTTPException(400, "Media disabled in this room")
+    if media_url and media_type and media_type != "image":
+        raise HTTPException(400, "Only images are allowed in chat messages")
 
-    if room.cooldown_enabled and room.cooldown_seconds > 0:
+    if user.role != "boss" and room.cooldown_enabled and room.cooldown_seconds > 0:
         state = db.query(RoomUserState).filter(RoomUserState.room_id == payload.room_id, RoomUserState.user_id == user.id).first()
         if state and state.last_message_at:
             available_at = state.last_message_at + timedelta(seconds=room.cooldown_seconds)
@@ -473,11 +487,14 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
     db.add(msg)
     db.commit()
     db.refresh(msg)
+    member = db.query(RoomMember).filter(RoomMember.room_id == msg.room_id, RoomMember.user_id == msg.user_id).first()
     return {
         "id": msg.id,
         "room_id": msg.room_id,
         "user_id": msg.user_id,
         "username": user.username,
+        "role": user.role,
+        "nickname_color": member.nickname_color if member else "#9fc5ff",
         "content": msg.content,
         "media_url": msg.media_url,
         "media_type": msg.media_type,
@@ -494,8 +511,9 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
     if not is_member and not (room.is_main and user.role == "boss"):
         raise HTTPException(403, "You are not a member of this room")
     rows = (
-        db.query(Message, User.username)
+        db.query(Message, User.username, User.role, RoomMember.nickname_color)
         .join(User, User.id == Message.user_id)
+        .join(RoomMember, (RoomMember.room_id == Message.room_id) & (RoomMember.user_id == Message.user_id))
         .filter(Message.room_id == room_id)
         .order_by(Message.created_at.desc())
         .limit(50)
@@ -507,12 +525,14 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
             "room_id": msg.room_id,
             "user_id": msg.user_id,
             "username": username,
+            "role": role,
+            "nickname_color": nickname_color or "#9fc5ff",
             "content": msg.content,
             "media_url": msg.media_url,
             "media_type": msg.media_type,
             "created_at": msg.created_at,
         }
-        for msg, username in rows
+        for msg, username, role, nickname_color in rows
     ]
 
 

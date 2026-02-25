@@ -27,11 +27,13 @@ export function App() {
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
+  const [chatMedia, setChatMedia] = useState(null)
   const [chatError, setChatError] = useState('')
   const [slowmodeNotice, setSlowmodeNotice] = useState('')
   const wsRef = useRef(null)
   const slowmodeTimerRef = useRef(null)
   const [showRoomModal, setShowRoomModal] = useState(false)
+  const chatFileInputRef = useRef(null)
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
   const [joinCodeInput, setJoinCodeInput] = useState('')
@@ -228,15 +230,16 @@ export function App() {
   }
 
   const sendMessage = async () => {
-    if (!selectedRoomId || !message.trim()) return
+    if (!selectedRoomId || (!message.trim() && !chatMedia)) return
     setChatError('')
     try {
-      const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message }, { headers })
+      const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message, media_url: chatMedia?.url || '', media_type: chatMedia?.type || '' }, { headers })
       setChat((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data]))
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'message_created', room_id: selectedRoomId, message: data }))
       }
       setMessage('')
+      setChatMedia(null)
       setSlowmodeNotice('')
     } catch (err) {
       const detail = err.response?.data?.detail
@@ -343,7 +346,7 @@ export function App() {
         <main className="chat-layout card">
           <aside className="channels-sidebar">
             <div className="channels-header">Чаты <span>|</span><button onClick={() => setShowRoomModal(true)} className="add-channel-btn">+</button></div>
-            <div className="chat-code-top join-row"><input value={joinCodeInput} onChange={(e) => setJoinCodeInput(e.target.value)} placeholder="Код чата" /><button onClick={joinByCode}>✓</button></div>
+            <div className="chat-code-top"><div className="join-input-wrap"><input value={joinCodeInput} onChange={(e) => setJoinCodeInput(e.target.value)} placeholder="Код чата" /><button className="join-inline-btn" onClick={joinByCode}>✓</button></div></div>
             <div className="channels-list">
               {rooms.map((r) => (
                 <button key={r.id} className={`channel-item ${selectedRoomId === r.id ? 'active' : ''}`} onClick={() => setSelectedRoomId(r.id)}>
@@ -356,11 +359,14 @@ export function App() {
 
           <section className="posts-column">
             <section className="posts-scroll-block chat-box no-radius">
-              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b>{m.username || `#${m.user_id}`}</b>: {m.content} {m.media_url && <a href={`${api.defaults.baseURL}${m.media_url}`} target="_blank">медиа</a>} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
+              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>: {m.content} {m.media_url && <img className="chat-inline-image" src={`${api.defaults.baseURL}${m.media_url}`} alt="chat-media" />} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
             </section>
             <div className="chat-input-wrap">
             {slowmodeNotice && <div className="slowmode-notice">{slowmodeNotice}</div>}
+            {chatMedia && <div className="chat-media-preview"><img src={`${api.defaults.baseURL}${chatMedia.url}`} alt="preview" /></div>}
             <div className="chat-input no-radius">
+              <button type="button" className="clip-btn" onClick={() => chatFileInputRef.current?.click()}>📎</button>
+              <input type="file" ref={chatFileInputRef} style={{ display: "none" }} accept="image/*" onChange={async (e) => e.target.files?.[0] && setChatMedia(await uploadMedia(e.target.files[0]))} />
               <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
               <button className="post-send-btn" onClick={sendMessage}>➤</button>
             </div>

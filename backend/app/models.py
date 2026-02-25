@@ -90,6 +90,7 @@ class RoomMember(Base):
     room_id = Column(Integer, ForeignKey("rooms.id"), index=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     joined_at = Column(DateTime, default=datetime.utcnow)
+    nickname_color = Column(String(16), default="#9fc5ff", nullable=False)
 
 
 class RoomInvite(Base):
