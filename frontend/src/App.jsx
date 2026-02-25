@@ -28,15 +28,11 @@ export function App() {
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
   const [chatError, setChatError] = useState('')
-  const [invites, setInvites] = useState([])
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
-  const [inviteUsername, setInviteUsername] = useState('')
-  const [roomRules, setRoomRules] = useState([])
-  const [ruleUserId, setRuleUserId] = useState('')
-  const [ruleCooldown, setRuleCooldown] = useState(0)
-  const [ruleCanMedia, setRuleCanMedia] = useState(true)
+  const [joinLink, setJoinLink] = useState('')
+  const [joinCodeInput, setJoinCodeInput] = useState('')
 
   const [commentModalPost, setCommentModalPost] = useState(null)
   const [comments, setComments] = useState([])
@@ -94,16 +90,6 @@ export function App() {
     if (!token || !selectedRoomId) return
     api.get(`/api/chat/messages/${selectedRoomId}`, { headers }).then((r) => setChat(r.data))
   }, [token, selectedRoomId, headers])
-
-  useEffect(() => {
-    if (!token) return
-    api.get('/api/rooms/invites', { headers }).then((r) => setInvites(r.data))
-  }, [token, headers])
-
-  useEffect(() => {
-    if (!token || !selectedRoomId || !canManageSelectedRoom) return
-    api.get(`/api/rooms/${selectedRoomId}/rules`, { headers }).then((r) => setRoomRules(r.data))
-  }, [token, selectedRoomId, canManageSelectedRoom, headers])
 
   const login = async (e) => {
     e.preventDefault()
@@ -236,26 +222,23 @@ export function App() {
     await loadBase()
   }
 
-  const saveRoomSettings = async () => {
+  const patchRoomSettings = async (changes) => {
     if (!selectedRoomId) return
-    await api.patch(`/api/rooms/${selectedRoomId}`, { allow_media: selectedRoom.allow_media }, { headers })
+    const { data } = await api.patch(`/api/rooms/${selectedRoomId}`, changes, { headers })
+    setRooms((prev) => prev.map((r) => (r.id === data.id ? data : r)))
+  }
+
+  const fetchJoinLink = async () => {
+    if (!selectedRoomId || !canManageSelectedRoom) return
+    const { data } = await api.get(`/api/rooms/${selectedRoomId}/join-link`, { headers })
+    setJoinLink(`${api.defaults.baseURL}${data.join_path}`)
+  }
+
+  const joinByCode = async () => {
+    if (!joinCodeInput.trim()) return
+    await api.get(`/api/rooms/join/${joinCodeInput.trim().toUpperCase()}`, { headers })
+    setJoinCodeInput('')
     await loadBase()
-  }
-
-  const inviteToRoom = async () => {
-    if (!selectedRoomId || !inviteUsername.trim()) return
-    await api.post(`/api/rooms/${selectedRoomId}/invites`, { username: inviteUsername }, { headers })
-    setInviteUsername('')
-  }
-
-  const respondInvite = async (inviteId, action) => {
-    await api.post(`/api/rooms/invites/${inviteId}`, { action }, { headers })
-    const [roomsResp, invitesResp] = await Promise.all([
-      api.get('/api/rooms', { headers }),
-      api.get('/api/rooms/invites', { headers }),
-    ])
-    setRooms(roomsResp.data)
-    setInvites(invitesResp.data)
   }
 
   const removeMessage = async (id) => {
@@ -263,12 +246,6 @@ export function App() {
     setChat((prev) => prev.filter((m) => m.id !== id))
   }
 
-  const setRule = async () => {
-    if (!selectedRoomId || !ruleUserId) return
-    await api.patch(`/api/rooms/${selectedRoomId}/rules`, { user_id: Number(ruleUserId), cooldown_seconds: Number(ruleCooldown), can_attach_media: ruleCanMedia }, { headers })
-    const { data } = await api.get(`/api/rooms/${selectedRoomId}/rules`, { headers })
-    setRoomRules(data)
-  }
 
   if (!token) {
     return <div className="auth-page"><form className="auth-card card" onSubmit={authMode === 'login' ? login : register}><h1>{authMode === 'login' ? 'Вход' : 'Регистрация'}</h1>{authError && <div className="auth-error">{authError}</div>}<input name="username" placeholder="Логин" required /><input name="password" type="password" placeholder="Пароль" required />{authMode === 'register' && <input name="confirmPassword" type="password" placeholder="Повторите пароль" required />}<button type="submit">{authMode === 'login' ? 'Войти' : 'Создать аккаунт'}</button><button type="button" className="link-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Вход'}</button></form></div>
@@ -332,36 +309,31 @@ export function App() {
               ))}
             </div>
             <div className="chat-invites">
-              <h4>Приглашения</h4>
-              {invites.map((inv) => <div key={inv.id} className="invite-item">{inv.room_name}<button onClick={() => respondInvite(inv.id, 'accept')}>✓</button><button onClick={() => respondInvite(inv.id, 'decline')}>✕</button></div>)}
+              <h4>Вступить по коду</h4>
+              <div className="join-row"><input value={joinCodeInput} onChange={(e) => setJoinCodeInput(e.target.value)} placeholder="Код чата" /><button onClick={joinByCode}>✓</button></div>
             </div>
           </aside>
 
           <section className="posts-column">
-            <section className="posts-scroll-block chat-box">
+            <section className="posts-scroll-block chat-box no-radius">
               {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b>#{m.user_id}</b>: {m.content} {m.media_url && <a href={`${api.defaults.baseURL}${m.media_url}`} target="_blank">медиа</a>} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
             </section>
-            <div className="chat-input">
+            <div className="chat-input no-radius">
               <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
-              <button onClick={sendMessage}>Отправить</button>
+              <button className="post-send-btn" onClick={sendMessage}>✓</button>
             </div>
             {chatError && <div className="auth-error">{chatError}</div>}
           </section>
 
-          <aside className="chat-settings card">
+          <aside className="chat-settings">
             <h3>Настройки чата</h3>
             {selectedRoom && canManageSelectedRoom ? <>
-              <label><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => setRooms((prev) => prev.map((r) => r.id === selectedRoom.id ? { ...r, allow_media: e.target.checked } : r))} /> Разрешить медиа</label>
-              <button onClick={saveRoomSettings}>Сохранить</button>
-              <input value={inviteUsername} onChange={(e) => setInviteUsername(e.target.value)} placeholder="username для приглашения" />
-              <button onClick={inviteToRoom}>Пригласить</button>
+              <div className="setting-row"><span>Медиа</span><label className="switch"><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => patchRoomSettings({ allow_media: e.target.checked })} /><span className="slider" /></label></div>
+              <div className="setting-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label></div>
+              <input type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value) })} placeholder="Секунды кулдауна" />
+              <div className="setting-row"><span>Ссылка входа</span><button onClick={fetchJoinLink}>Получить</button></div>
+              {joinLink && <a href={joinLink} target="_blank" rel="noreferrer">{joinLink}</a>}
               {!selectedRoom.is_main && <button onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
-              <h4>Правила пользователя</h4>
-              <input value={ruleUserId} onChange={(e) => setRuleUserId(e.target.value)} placeholder="ID пользователя" />
-              <input type="number" value={ruleCooldown} onChange={(e) => setRuleCooldown(e.target.value)} placeholder="Cooldown (sec)" />
-              <label><input type="checkbox" checked={ruleCanMedia} onChange={(e) => setRuleCanMedia(e.target.checked)} /> Медиа разрешено</label>
-              <button onClick={setRule}>Применить правило</button>
-              <div>{roomRules.map((r) => <div key={r.id}>#{r.user_id} {r.username}: {r.cooldown_seconds}s / media:{r.can_attach_media ? 'on' : 'off'}</div>)}</div>
             </> : <p>Недостаточно прав для настройки.</p>}
           </aside>
         </main>
@@ -370,6 +342,7 @@ export function App() {
       {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
+      {showRoomModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый чат</h3><input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Название чата" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewRoomAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowRoomModal(false)}>Отмена</button><button onClick={createRoom}>Создать</button></div></div></div>}
 
       {commentModalPost && <div className="modal-backdrop"><div className="modal card"><div className="comments-header"><button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button><span className="header-sep">|</span><h3>Комментарии</h3></div><div className="comments-list fixed" ref={commentsRef}>{comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}<button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button></div><div className="comment-input-wrap"><input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" /><div className="comment-actions-right"><button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button><button className="send-inline" onClick={sendComment}>›</button>{showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}</div></div></div></div>}
     </div>

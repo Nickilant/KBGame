@@ -65,6 +65,9 @@ class Room(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     is_main = Column(Boolean, default=False)
     allow_media = Column(Boolean, default=True)
+    cooldown_enabled = Column(Boolean, default=False)
+    cooldown_seconds = Column(Integer, default=0)
+    join_code = Column(String(24), unique=True, nullable=True, index=True)
 
 
 class Message(Base):

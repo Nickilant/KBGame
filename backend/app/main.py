@@ -1,4 +1,3 @@
-import base64
 import os
 import time
 from datetime import datetime, timedelta
@@ -28,7 +27,6 @@ from .models import (
     Room,
     RoomInvite,
     RoomMember,
-    RoomUserRule,
     RoomUserState,
     User,
 )
@@ -48,10 +46,7 @@ from .schemas import (
     RegisterIn,
     RoleUpdateIn,
     RoomIn,
-    RoomInviteDecisionIn,
-    RoomInviteIn,
     RoomUpdateIn,
-    RoomUserRuleIn,
     StatUpdateIn,
     TokenOut,
     UserOut,
@@ -75,6 +70,10 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_main BOOLEAN DEFAULT FALSE"))
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS allow_media BOOLEAN DEFAULT TRUE"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS cooldown_enabled BOOLEAN DEFAULT FALSE"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS cooldown_seconds INTEGER DEFAULT 0"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS join_code VARCHAR(24)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_rooms_join_code ON rooms(join_code)"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(32) DEFAULT ''"))
 
@@ -207,11 +206,13 @@ def init_data():
 
     global_room = db.query(Room).filter(Room.name == "global").first()
     if not global_room:
-        global_room = Room(name="global", avatar_url="", created_by=admin.id, is_main=True)
+        global_room = Room(name="global", avatar_url="", created_by=admin.id, is_main=True, join_code="GLOBAL")
         db.add(global_room)
         db.flush()
     else:
         global_room.is_main = True
+        if not global_room.join_code:
+            global_room.join_code = "GLOBAL"
 
     if not db.query(RoomMember).filter(RoomMember.room_id == global_room.id, RoomMember.user_id == admin.id).first():
         db.add(RoomMember(room_id=global_room.id, user_id=admin.id))
@@ -292,7 +293,6 @@ def raid_attack(user: User = Depends(require_roles("player", "master_admin", "ad
 
 
 def _room_to_dict(room: Room, user: User | None = None, db: Session | None = None) -> dict:
-    invite_code = base64.urlsafe_b64encode(str(room.id).encode()).decode().rstrip("=")
     can_manage = False
     if user:
         can_manage = user.role == "boss" if room.is_main else room.created_by == user.id
@@ -304,10 +304,22 @@ def _room_to_dict(room: Room, user: User | None = None, db: Session | None = Non
         "created_by": room.created_by,
         "is_main": room.is_main,
         "allow_media": room.allow_media,
-        "invite_code": invite_code,
+        "cooldown_enabled": room.cooldown_enabled,
+        "cooldown_seconds": room.cooldown_seconds,
+        "join_code": room.join_code,
         "can_manage": can_manage,
     }
 
+
+
+
+def _generate_join_code(db: Session) -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    for _ in range(30):
+        code = "".join(__import__("secrets").choice(alphabet) for _ in range(8))
+        if not db.query(Room).filter(Room.join_code == code).first():
+            return code
+    return uuid4().hex[:8].upper()
 
 def _ensure_room_member(db: Session, room_id: int, user_id: int):
     if not db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first():
@@ -328,7 +340,7 @@ def create_room(payload: RoomIn, user: User = Depends(get_current_user), db: Ses
     if db.query(Room).filter(func.lower(Room.name) == name.lower()).first():
         raise HTTPException(400, "Room already exists")
 
-    room = Room(name=name, avatar_url=payload.avatar_url or "", created_by=user.id, is_main=False)
+    room = Room(name=name, avatar_url=payload.avatar_url or "", created_by=user.id, is_main=False, join_code=_generate_join_code(db))
     db.add(room)
     db.flush()
     db.add(RoomMember(room_id=room.id, user_id=user.id))
@@ -371,6 +383,11 @@ def update_room(room_id: int, payload: RoomUpdateIn, user: User = Depends(get_cu
         room.avatar_url = changes["avatar_url"] or ""
     if "allow_media" in changes:
         room.allow_media = changes["allow_media"]
+    if "cooldown_enabled" in changes:
+        room.cooldown_enabled = changes["cooldown_enabled"]
+    if "cooldown_seconds" in changes:
+        cooldown_seconds = max(0, int(changes["cooldown_seconds"] or 0))
+        room.cooldown_seconds = cooldown_seconds
 
     db.commit()
     db.refresh(room)
@@ -389,7 +406,6 @@ def delete_room(room_id: int, user: User = Depends(get_current_user), db: Sessio
 
     db.query(RoomInvite).filter(RoomInvite.room_id == room_id).delete(synchronize_session=False)
     db.query(RoomMember).filter(RoomMember.room_id == room_id).delete(synchronize_session=False)
-    db.query(RoomUserRule).filter(RoomUserRule.room_id == room_id).delete(synchronize_session=False)
     db.query(RoomUserState).filter(RoomUserState.room_id == room_id).delete(synchronize_session=False)
     db.query(Message).filter(Message.room_id == room_id).delete(synchronize_session=False)
     db.delete(room)
@@ -397,126 +413,28 @@ def delete_room(room_id: int, user: User = Depends(get_current_user), db: Sessio
     return {"ok": True}
 
 
-@app.post("/api/rooms/{room_id}/invites")
-def invite_to_room(room_id: int, payload: RoomInviteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@app.get("/api/rooms/{room_id}/join-link")
+def get_join_link(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise HTTPException(404, "Room not found")
-    if room.created_by != user.id and not (room.is_main and user.role == "boss"):
-        raise HTTPException(403, "Only room owner can invite")
-
-    target = db.query(User).filter(func.lower(User.username) == payload.username.strip().lower()).first()
-    if not target:
-        raise HTTPException(404, "User not found")
-    if db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == target.id).first():
-        raise HTTPException(400, "User already in room")
-
-    invite = db.query(RoomInvite).filter(RoomInvite.room_id == room_id, RoomInvite.invited_user_id == target.id).first()
-    if invite:
-        invite.status = "pending"
-        invite.invited_by = user.id
-    else:
-        db.add(RoomInvite(room_id=room_id, invited_user_id=target.id, invited_by=user.id, status="pending"))
-    db.commit()
-    return {"ok": True}
+    if not _can_manage_room(user, room):
+        raise HTTPException(403, "Insufficient permissions")
+    if not room.join_code:
+        room.join_code = _generate_join_code(db)
+        db.commit()
+    return {"join_code": room.join_code, "join_path": f"/api/rooms/join/{room.join_code}"}
 
 
-@app.get("/api/rooms/invites")
-def list_my_invites(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    invites = (
-        db.query(RoomInvite, Room, User)
-        .join(Room, Room.id == RoomInvite.room_id)
-        .join(User, User.id == RoomInvite.invited_by)
-        .filter(RoomInvite.invited_user_id == user.id, RoomInvite.status == "pending")
-        .order_by(RoomInvite.created_at.desc())
-        .all()
-    )
-    return [{"id": inv.id, "room_id": room.id, "room_name": room.name, "invited_by": inviter.username} for inv, room, inviter in invites]
-
-
-@app.post("/api/rooms/invites/{invite_id}")
-def handle_invite(invite_id: int, payload: RoomInviteDecisionIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    invite = db.query(RoomInvite).filter(RoomInvite.id == invite_id, RoomInvite.invited_user_id == user.id).first()
-    if not invite:
-        raise HTTPException(404, "Invite not found")
-    if invite.status != "pending":
-        raise HTTPException(400, "Invite already handled")
-
-    action = payload.action.lower()
-    if action not in {"accept", "decline"}:
-        raise HTTPException(400, "Action must be accept or decline")
-
-    if action == "accept":
-        _ensure_room_member(db, invite.room_id, user.id)
-        invite.status = "accepted"
-    else:
-        invite.status = "declined"
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/api/rooms/join/{invite_code}")
-def join_room(invite_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    padding = "=" * (-len(invite_code) % 4)
-    try:
-        room_id = int(base64.urlsafe_b64decode((invite_code + padding).encode()).decode())
-    except Exception:
-        raise HTTPException(400, "Invalid invite code")
-
-    room = db.query(Room).filter(Room.id == room_id).first()
+@app.get("/api/rooms/join/{join_code}")
+def join_room(join_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.join_code == join_code.upper()).first()
     if not room:
         raise HTTPException(404, "Room not found")
 
-    _ensure_room_member(db, room_id, user.id)
+    _ensure_room_member(db, room.id, user.id)
     db.commit()
     return _room_to_dict(room, user)
-
-
-@app.patch("/api/rooms/{room_id}/rules")
-def set_room_rule(room_id: int, payload: RoomUserRuleIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    room = db.query(Room).filter(Room.id == room_id).first()
-    if not room:
-        raise HTTPException(404, "Room not found")
-    if not _can_manage_room(user, room):
-        raise HTTPException(403, "Insufficient permissions")
-
-    if payload.cooldown_seconds < 0:
-        raise HTTPException(400, "Cooldown must be >= 0")
-
-    rule = db.query(RoomUserRule).filter(RoomUserRule.room_id == room_id, RoomUserRule.user_id == payload.user_id).first()
-    if not rule:
-        rule = RoomUserRule(room_id=room_id, user_id=payload.user_id)
-        db.add(rule)
-    rule.cooldown_seconds = payload.cooldown_seconds
-    rule.can_attach_media = payload.can_attach_media
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/api/rooms/{room_id}/rules")
-def list_room_rules(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    room = db.query(Room).filter(Room.id == room_id).first()
-    if not room:
-        raise HTTPException(404, "Room not found")
-    if not _can_manage_room(user, room):
-        raise HTTPException(403, "Insufficient permissions")
-
-    rows = (
-        db.query(RoomUserRule, User)
-        .join(User, User.id == RoomUserRule.user_id)
-        .filter(RoomUserRule.room_id == room_id)
-        .all()
-    )
-    return [
-        {
-            "id": rule.id,
-            "user_id": target.id,
-            "username": target.username,
-            "cooldown_seconds": rule.cooldown_seconds,
-            "can_attach_media": rule.can_attach_media,
-        }
-        for rule, target in rows
-    ]
 
 
 @app.post("/api/chat/messages")
@@ -535,16 +453,13 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
     if not content and not media_url:
         raise HTTPException(400, "Message is empty")
 
-    rule = db.query(RoomUserRule).filter(RoomUserRule.room_id == payload.room_id, RoomUserRule.user_id == user.id).first()
     if media_url and not room.allow_media:
         raise HTTPException(400, "Media disabled in this room")
-    if media_url and rule and not rule.can_attach_media:
-        raise HTTPException(400, "You cannot attach media in this room")
 
-    if rule and rule.cooldown_seconds > 0:
+    if room.cooldown_enabled and room.cooldown_seconds > 0:
         state = db.query(RoomUserState).filter(RoomUserState.room_id == payload.room_id, RoomUserState.user_id == user.id).first()
         if state and state.last_message_at:
-            available_at = state.last_message_at + timedelta(seconds=rule.cooldown_seconds)
+            available_at = state.last_message_at + timedelta(seconds=room.cooldown_seconds)
             if datetime.utcnow() < available_at:
                 raise HTTPException(429, f"Message cooldown active until {available_at.isoformat()}Z")
         if not state:
@@ -868,7 +783,6 @@ def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_
     db.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
     db.query(RoomInvite).filter((RoomInvite.invited_user_id == user_id) | (RoomInvite.invited_by == user_id)).delete(synchronize_session=False)
     db.query(RoomMember).filter(RoomMember.user_id == user_id).delete(synchronize_session=False)
-    db.query(RoomUserRule).filter(RoomUserRule.user_id == user_id).delete(synchronize_session=False)
     db.query(RoomUserState).filter(RoomUserState.user_id == user_id).delete(synchronize_session=False)
     db.query(PostLike).filter(PostLike.user_id == user_id).delete(synchronize_session=False)
     db.query(PostReaction).filter(PostReaction.user_id == user_id).delete(synchronize_session=False)
@@ -881,7 +795,6 @@ def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_
         db.query(Message).filter(Message.room_id.in_(room_ids)).delete(synchronize_session=False)
         db.query(RoomInvite).filter(RoomInvite.room_id.in_(room_ids)).delete(synchronize_session=False)
         db.query(RoomMember).filter(RoomMember.room_id.in_(room_ids)).delete(synchronize_session=False)
-        db.query(RoomUserRule).filter(RoomUserRule.room_id.in_(room_ids)).delete(synchronize_session=False)
         db.query(RoomUserState).filter(RoomUserState.room_id.in_(room_ids)).delete(synchronize_session=False)
         db.query(Room).filter(Room.id.in_(room_ids)).delete(synchronize_session=False)
 

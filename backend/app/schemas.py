@@ -79,20 +79,12 @@ class RoomUpdateIn(BaseModel):
     name: str | None = None
     avatar_url: str | None = None
     allow_media: bool | None = None
-
-
-class RoomInviteIn(BaseModel):
-    username: str
+    cooldown_enabled: bool | None = None
+    cooldown_seconds: int | None = None
 
 
 class RoomInviteDecisionIn(BaseModel):
     action: str
-
-
-class RoomUserRuleIn(BaseModel):
-    user_id: int
-    cooldown_seconds: int = 0
-    can_attach_media: bool = True
 
 
 class StatUpdateIn(BaseModel):
