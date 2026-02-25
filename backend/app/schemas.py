@@ -48,7 +48,9 @@ class AttackOut(BaseModel):
 
 class MessageIn(BaseModel):
     room_id: int
-    content: str
+    content: str = ""
+    media_url: str = ""
+    media_type: str = ""
 
 
 class PostIn(BaseModel):
@@ -70,6 +72,19 @@ class PostReactionIn(BaseModel):
 
 class RoomIn(BaseModel):
     name: str
+    avatar_url: str = ""
+
+
+class RoomUpdateIn(BaseModel):
+    name: str | None = None
+    avatar_url: str | None = None
+    allow_media: bool | None = None
+    cooldown_enabled: bool | None = None
+    cooldown_seconds: int | None = None
+
+
+class RoomInviteDecisionIn(BaseModel):
+    action: str
 
 
 class StatUpdateIn(BaseModel):

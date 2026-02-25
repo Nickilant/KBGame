@@ -61,7 +61,13 @@ class Room(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(64), unique=True)
+    avatar_url = Column(String(255), default="")
     created_by = Column(Integer, ForeignKey("users.id"))
+    is_main = Column(Boolean, default=False)
+    allow_media = Column(Boolean, default=True)
+    cooldown_enabled = Column(Boolean, default=False)
+    cooldown_seconds = Column(Integer, default=0)
+    join_code = Column(String(24), unique=True, nullable=True, index=True)
 
 
 class Message(Base):
@@ -71,7 +77,53 @@ class Message(Base):
     room_id = Column(Integer, ForeignKey("rooms.id"), index=True)
     user_id = Column(Integer, ForeignKey("users.id"), index=True)
     content = Column(Text, nullable=False)
+    media_url = Column(String(255), default="")
+    media_type = Column(String(32), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class RoomMember(Base):
+    __tablename__ = "room_members"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_room_member"),)
+
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    nickname_color = Column(String(16), default="#9fc5ff", nullable=False)
+
+
+class RoomInvite(Base):
+    __tablename__ = "room_invites"
+    __table_args__ = (UniqueConstraint("room_id", "invited_user_id", name="uq_room_invite"),)
+
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), index=True, nullable=False)
+    invited_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    invited_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(16), default="pending", nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class RoomUserRule(Base):
+    __tablename__ = "room_user_rules"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_room_user_rule"),)
+
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    cooldown_seconds = Column(Integer, default=0, nullable=False)
+    can_attach_media = Column(Boolean, default=True, nullable=False)
+
+
+class RoomUserState(Base):
+    __tablename__ = "room_user_states"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_room_user_state"),)
+
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    last_message_at = Column(DateTime, nullable=True)
 
 
 class Post(Base):

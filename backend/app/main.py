@@ -1,6 +1,6 @@
-import base64
 import os
 import time
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, WebSocket
@@ -13,7 +13,23 @@ from sqlalchemy.orm import Session
 from .auth import create_access_token, hash_password, verify_password
 from .database import Base, engine, get_db
 from .deps import get_current_user, require_roles
-from .models import Boss, Channel, Inventory, Item, Message, Post, PostComment, PostLike, PostReaction, PostView, Room, User
+from .models import (
+    Boss,
+    Channel,
+    Inventory,
+    Item,
+    Message,
+    Post,
+    PostComment,
+    PostLike,
+    PostReaction,
+    PostView,
+    Room,
+    RoomInvite,
+    RoomMember,
+    RoomUserState,
+    User,
+)
 from .raid import boss_auto_attack, get_raid_state, player_attack, start_raid, stop_raid
 from .schemas import (
     AttackOut,
@@ -30,6 +46,7 @@ from .schemas import (
     RegisterIn,
     RoleUpdateIn,
     RoomIn,
+    RoomUpdateIn,
     StatUpdateIn,
     TokenOut,
     UserOut,
@@ -49,6 +66,60 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_read_post_id INTEGER"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS audio_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS channel_id INTEGER"))
+
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255) DEFAULT ''"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_main BOOLEAN DEFAULT FALSE"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS allow_media BOOLEAN DEFAULT TRUE"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS cooldown_enabled BOOLEAN DEFAULT FALSE"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS cooldown_seconds INTEGER DEFAULT 0"))
+        connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS join_code VARCHAR(24)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_rooms_join_code ON rooms(join_code)"))
+        connection.execute(text("ALTER TABLE room_members ADD COLUMN IF NOT EXISTS nickname_color VARCHAR(16) DEFAULT '#9fc5ff'"))
+        connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url VARCHAR(255) DEFAULT ''"))
+        connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(32) DEFAULT ''"))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS room_members (
+                id SERIAL PRIMARY KEY,
+                room_id INTEGER REFERENCES rooms(id) NOT NULL,
+                user_id INTEGER REFERENCES users(id) NOT NULL,
+                joined_at TIMESTAMP DEFAULT NOW(),
+                CONSTRAINT uq_room_member UNIQUE (room_id, user_id)
+            )
+        """))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS room_invites (
+                id SERIAL PRIMARY KEY,
+                room_id INTEGER REFERENCES rooms(id) NOT NULL,
+                invited_user_id INTEGER REFERENCES users(id) NOT NULL,
+                invited_by INTEGER REFERENCES users(id) NOT NULL,
+                status VARCHAR(16) DEFAULT 'pending' NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW(),
+                CONSTRAINT uq_room_invite UNIQUE (room_id, invited_user_id)
+            )
+        """))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS room_user_rules (
+                id SERIAL PRIMARY KEY,
+                room_id INTEGER REFERENCES rooms(id) NOT NULL,
+                user_id INTEGER REFERENCES users(id) NOT NULL,
+                cooldown_seconds INTEGER DEFAULT 0 NOT NULL,
+                can_attach_media BOOLEAN DEFAULT TRUE NOT NULL,
+                CONSTRAINT uq_room_user_rule UNIQUE (room_id, user_id)
+            )
+        """))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS room_user_states (
+                id SERIAL PRIMARY KEY,
+                room_id INTEGER REFERENCES rooms(id) NOT NULL,
+                user_id INTEGER REFERENCES users(id) NOT NULL,
+                last_message_at TIMESTAMP NULL,
+                CONSTRAINT uq_room_user_state UNIQUE (room_id, user_id)
+            )
+        """))
 
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS channels (
@@ -134,8 +205,22 @@ def init_data():
     if not db.query(User).filter(User.username == "root_admin").first():
         db.add(User(username="root_admin", password_hash=hash_password("root_admin_123"), role="admin"))
 
-    if not db.query(Room).filter(Room.name == "global").first():
-        db.add(Room(name="global", created_by=admin.id))
+    global_room = db.query(Room).filter(Room.name == "global").first()
+    if not global_room:
+        global_room = Room(name="global", avatar_url="", created_by=admin.id, is_main=True, join_code="GLOBAL")
+        db.add(global_room)
+        db.flush()
+    else:
+        global_room.is_main = True
+        if not global_room.join_code:
+            global_room.join_code = "GLOBAL"
+
+    if not db.query(RoomMember).filter(RoomMember.room_id == global_room.id, RoomMember.user_id == admin.id).first():
+        db.add(RoomMember(room_id=global_room.id, user_id=admin.id, nickname_color=_pastel_from_seed(global_room.id, admin.id)))
+
+    stale_members = db.query(RoomMember).filter((RoomMember.nickname_color.is_(None)) | (RoomMember.nickname_color == "#9fc5ff")).all()
+    for member in stale_members:
+        member.nickname_color = _pastel_from_seed(member.room_id, member.user_id)
 
 
     if not db.query(Boss).first():
@@ -212,41 +297,201 @@ def raid_attack(user: User = Depends(require_roles("player", "master_admin", "ad
     return AttackOut(damage=damage, boss_hp=hp)
 
 
-def _room_to_dict(room: Room) -> dict:
-    invite_code = base64.urlsafe_b64encode(str(room.id).encode()).decode().rstrip("=")
-    return {"id": room.id, "name": room.name, "created_by": room.created_by, "invite_code": invite_code}
+def _room_to_dict(room: Room, user: User | None = None, db: Session | None = None) -> dict:
+    can_manage = False
+    if user:
+        can_manage = user.role == "boss" if room.is_main else room.created_by == user.id
+
+    return {
+        "id": room.id,
+        "name": room.name,
+        "avatar_url": room.avatar_url or "",
+        "created_by": room.created_by,
+        "is_main": room.is_main,
+        "allow_media": room.allow_media,
+        "cooldown_enabled": room.cooldown_enabled,
+        "cooldown_seconds": room.cooldown_seconds,
+        "join_code": room.join_code,
+        "can_manage": can_manage,
+    }
+
+
+
+
+def _generate_join_code(db: Session) -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    for _ in range(30):
+        code = "".join(__import__("secrets").choice(alphabet) for _ in range(8))
+        if not db.query(Room).filter(Room.join_code == code).first():
+            return code
+    return uuid4().hex[:8].upper()
+
+def _generate_nickname_color() -> str:
+    import colorsys
+    import secrets
+
+    h = secrets.randbelow(360) / 360.0
+    s = 0.32 + (secrets.randbelow(24) / 100.0)
+    v = 0.90 + (secrets.randbelow(8) / 100.0)
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+def _pastel_from_seed(room_id: int, user_id: int) -> str:
+    import colorsys
+
+    seed = ((room_id * 92821) ^ (user_id * 68917)) % 360
+    h = seed / 360.0
+    s = 0.36
+    v = 0.93
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+
+def _ensure_room_member(db: Session, room_id: int, user_id: int):
+    member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user_id).first()
+    if not member:
+        db.add(RoomMember(room_id=room_id, user_id=user_id, nickname_color=_pastel_from_seed(room_id, user_id)))
+        return
+    if not member.nickname_color or member.nickname_color == "#9fc5ff":
+        member.nickname_color = _pastel_from_seed(room_id, user_id)
+
+
+def _can_manage_room(user: User, room: Room) -> bool:
+    if room.is_main:
+        return user.role == "boss"
+    return room.created_by == user.id
 
 
 @app.post("/api/rooms")
 def create_room(payload: RoomIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if db.query(Room).filter(Room.name == payload.name).first():
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Room name is required")
+    if db.query(Room).filter(func.lower(Room.name) == name.lower()).first():
         raise HTTPException(400, "Room already exists")
-    room = Room(name=payload.name, created_by=user.id)
+
+    room = Room(name=name, avatar_url=payload.avatar_url or "", created_by=user.id, is_main=False, join_code=_generate_join_code(db))
     db.add(room)
+    db.flush()
+    db.add(RoomMember(room_id=room.id, user_id=user.id, nickname_color=_pastel_from_seed(room.id, user.id)))
     db.commit()
     db.refresh(room)
-    return _room_to_dict(room)
+    return _room_to_dict(room, user)
 
 
 @app.get("/api/rooms")
-def list_rooms(db: Session = Depends(get_db)):
-    rooms = db.query(Room).all()
-    rooms = sorted(rooms, key=lambda room: (0 if room.name == "global" else 1, room.name.lower()))
-    return [_room_to_dict(room) for room in rooms]
+def list_rooms(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room_ids = [room_id for room_id, in db.query(RoomMember.room_id).filter(RoomMember.user_id == user.id).all()]
+    if user.role == "boss":
+        room_ids.extend([room_id for room_id, in db.query(Room.id).filter(Room.is_main.is_(True)).all()])
+    if not room_ids:
+        return []
+
+    rooms = db.query(Room).filter(Room.id.in_(set(room_ids))).all()
+    rooms = sorted(rooms, key=lambda room: (0 if room.is_main else 1, room.name.lower()))
+    return [_room_to_dict(room, user) for room in rooms]
 
 
-@app.get("/api/rooms/join/{invite_code}")
-def join_room(invite_code: str, _: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    padding = "=" * (-len(invite_code) % 4)
-    try:
-        room_id = int(base64.urlsafe_b64decode((invite_code + padding).encode()).decode())
-    except Exception:
-        raise HTTPException(400, "Invalid invite code")
-
+@app.patch("/api/rooms/{room_id}")
+def update_room(room_id: int, payload: RoomUpdateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise HTTPException(404, "Room not found")
-    return _room_to_dict(room)
+    if not _can_manage_room(user, room):
+        raise HTTPException(403, "Insufficient permissions")
+
+    changes = payload.model_dump(exclude_none=True)
+    if "name" in changes:
+        name = changes["name"].strip()
+        if not name:
+            raise HTTPException(400, "Room name is required")
+        exists = db.query(Room).filter(func.lower(Room.name) == name.lower(), Room.id != room_id).first()
+        if exists:
+            raise HTTPException(400, "Room already exists")
+        room.name = name
+    if "avatar_url" in changes:
+        room.avatar_url = changes["avatar_url"] or ""
+    if "allow_media" in changes:
+        room.allow_media = changes["allow_media"]
+    if "cooldown_enabled" in changes:
+        room.cooldown_enabled = changes["cooldown_enabled"]
+    if "cooldown_seconds" in changes:
+        cooldown_seconds = max(0, int(changes["cooldown_seconds"] or 0))
+        room.cooldown_seconds = cooldown_seconds
+
+    db.commit()
+    db.refresh(room)
+    return _room_to_dict(room, user)
+
+
+@app.delete("/api/rooms/{room_id}")
+def delete_room(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+    if room.is_main:
+        raise HTTPException(400, "Main room cannot be deleted")
+    if room.created_by != user.id:
+        raise HTTPException(403, "Only room owner can delete room")
+
+    db.query(RoomInvite).filter(RoomInvite.room_id == room_id).delete(synchronize_session=False)
+    db.query(RoomMember).filter(RoomMember.room_id == room_id).delete(synchronize_session=False)
+    db.query(RoomUserState).filter(RoomUserState.room_id == room_id).delete(synchronize_session=False)
+    db.query(Message).filter(Message.room_id == room_id).delete(synchronize_session=False)
+    db.delete(room)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/rooms/{room_id}/join-code")
+def get_join_code(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+    if not _can_manage_room(user, room):
+        raise HTTPException(403, "Insufficient permissions")
+    if not room.join_code:
+        room.join_code = _generate_join_code(db)
+        db.commit()
+    return {"join_code": room.join_code}
+
+
+@app.get("/api/rooms/join/{join_code}")
+def join_room(join_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.join_code == join_code.upper()).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+
+    _ensure_room_member(db, room.id, user.id)
+    db.commit()
+    return _room_to_dict(room, user)
+
+
+@app.get("/api/rooms/{room_id}/members")
+def room_members(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+    is_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user.id).first()
+    if not is_member and not (room.is_main and user.role == "boss"):
+        raise HTTPException(403, "You are not a member of this room")
+
+    rows = (
+        db.query(User.id, User.username, User.role, RoomMember.nickname_color)
+        .join(RoomMember, RoomMember.user_id == User.id)
+        .filter(RoomMember.room_id == room_id)
+        .order_by(User.username.asc())
+        .all()
+    )
+    return [
+        {
+            "id": user_id,
+            "username": username,
+            "role": role,
+            "nickname_color": color or _pastel_from_seed(room_id, user_id),
+        }
+        for user_id, username, role, color in rows
+    ]
 
 
 @app.post("/api/chat/messages")
@@ -255,30 +500,110 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
     if not room:
         raise HTTPException(404, "Room not found")
 
-    msg = Message(room_id=payload.room_id, user_id=user.id, content=payload.content)
+    is_member = db.query(RoomMember).filter(RoomMember.room_id == payload.room_id, RoomMember.user_id == user.id).first()
+    if not is_member and room.is_main and user.role == "boss":
+        _ensure_room_member(db, room.id, user.id)
+        is_member = True
+    if not is_member and not (room.is_main and user.role == "boss"):
+        raise HTTPException(403, "You are not a member of this room")
+
+    content = (payload.content or "").strip()
+    media_url = (payload.media_url or "").strip()
+    media_type = (payload.media_type or "").strip()
+    if not content and not media_url:
+        raise HTTPException(400, "Message is empty")
+
+    if media_url and not room.allow_media:
+        raise HTTPException(400, "Media disabled in this room")
+    if media_url and media_type and media_type != "image":
+        raise HTTPException(400, "Only images are allowed in chat messages")
+
+    if user.role != "boss" and room.cooldown_enabled and room.cooldown_seconds > 0:
+        state = db.query(RoomUserState).filter(RoomUserState.room_id == payload.room_id, RoomUserState.user_id == user.id).first()
+        if state and state.last_message_at:
+            available_at = state.last_message_at + timedelta(seconds=room.cooldown_seconds)
+            now = datetime.utcnow()
+            if now < available_at:
+                retry_after = max(1, int((available_at - now).total_seconds()))
+                raise HTTPException(429, {"code": "SLOWMODE", "retry_after_seconds": retry_after, "retry_at": available_at.isoformat() + "Z"})
+        if not state:
+            state = RoomUserState(room_id=payload.room_id, user_id=user.id)
+            db.add(state)
+        state.last_message_at = datetime.utcnow()
+
+    msg = Message(room_id=payload.room_id, user_id=user.id, content=content or "", media_url=media_url, media_type=media_type)
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    return msg
+    member = db.query(RoomMember).filter(RoomMember.room_id == msg.room_id, RoomMember.user_id == msg.user_id).first()
+    return {
+        "id": msg.id,
+        "room_id": msg.room_id,
+        "user_id": msg.user_id,
+        "username": user.username,
+        "role": user.role,
+        "nickname_color": (member.nickname_color if member and member.nickname_color else _pastel_from_seed(msg.room_id, msg.user_id)),
+        "content": msg.content,
+        "media_url": msg.media_url,
+        "media_type": msg.media_type,
+        "created_at": msg.created_at,
+    }
 
 
 @app.get("/api/chat/messages/{room_id}")
-def room_messages(room_id: int, db: Session = Depends(get_db)):
-    return db.query(Message).filter(Message.room_id == room_id).order_by(Message.created_at.desc()).limit(50).all()[::-1]
+def room_messages(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+    is_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user.id).first()
+    if not is_member and not (room.is_main and user.role == "boss"):
+        raise HTTPException(403, "You are not a member of this room")
+    rows = (
+        db.query(Message, User.username, User.role, RoomMember.nickname_color)
+        .join(User, User.id == Message.user_id)
+        .outerjoin(RoomMember, (RoomMember.room_id == Message.room_id) & (RoomMember.user_id == Message.user_id))
+        .filter(Message.room_id == room_id)
+        .order_by(Message.created_at.desc())
+        .limit(50)
+        .all()[::-1]
+    )
+    return [
+        {
+            "id": msg.id,
+            "room_id": msg.room_id,
+            "user_id": msg.user_id,
+            "username": username,
+            "role": role,
+            "nickname_color": nickname_color or _pastel_from_seed(msg.room_id, msg.user_id),
+            "content": msg.content,
+            "media_url": msg.media_url,
+            "media_type": msg.media_type,
+            "created_at": msg.created_at,
+        }
+        for msg, username, role, nickname_color in rows
+    ]
 
 
 @app.delete("/api/chat/messages/{message_id}")
-def delete_message(message_id: int, user: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
+def delete_message(message_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     msg = db.query(Message).filter(Message.id == message_id).first()
     if not msg:
         raise HTTPException(404, "Message not found")
+    room = db.query(Room).filter(Room.id == msg.room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+
+    allowed = (room.is_main and user.role == "boss") or (not room.is_main and room.created_by == user.id)
+    if not allowed:
+        raise HTTPException(403, "Insufficient permissions")
+
     db.delete(msg)
     db.commit()
     return {"ok": True}
 
 
 @app.post("/api/uploads/media")
-def upload_media(file: UploadFile = File(...), user: User = Depends(require_roles("boss"))):
+def upload_media(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     if not (file.content_type or "").startswith(("image/", "video/")):
         raise HTTPException(400, "Only image/video allowed")
 
@@ -555,15 +880,21 @@ def admin_delete_user(user_id: int, admin: User = Depends(require_roles("master_
         raise HTTPException(404, "User not found")
 
     db.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
+    db.query(RoomInvite).filter((RoomInvite.invited_user_id == user_id) | (RoomInvite.invited_by == user_id)).delete(synchronize_session=False)
+    db.query(RoomMember).filter(RoomMember.user_id == user_id).delete(synchronize_session=False)
+    db.query(RoomUserState).filter(RoomUserState.user_id == user_id).delete(synchronize_session=False)
     db.query(PostLike).filter(PostLike.user_id == user_id).delete(synchronize_session=False)
     db.query(PostReaction).filter(PostReaction.user_id == user_id).delete(synchronize_session=False)
     db.query(PostComment).filter(PostComment.user_id == user_id).delete(synchronize_session=False)
     db.query(PostView).filter(PostView.user_id == user_id).delete(synchronize_session=False)
     db.query(Inventory).filter(Inventory.player_id == user_id).delete(synchronize_session=False)
 
-    room_ids = [room.id for room in db.query(Room.id).filter(Room.created_by == user_id).all()]
+    room_ids = [room.id for room in db.query(Room.id).filter(Room.created_by == user_id, Room.is_main.is_(False)).all()]
     if room_ids:
         db.query(Message).filter(Message.room_id.in_(room_ids)).delete(synchronize_session=False)
+        db.query(RoomInvite).filter(RoomInvite.room_id.in_(room_ids)).delete(synchronize_session=False)
+        db.query(RoomMember).filter(RoomMember.room_id.in_(room_ids)).delete(synchronize_session=False)
+        db.query(RoomUserState).filter(RoomUserState.room_id.in_(room_ids)).delete(synchronize_session=False)
         db.query(Room).filter(Room.id.in_(room_ids)).delete(synchronize_session=False)
 
     user_post_ids = [post.id for post in db.query(Post.id).filter(Post.created_by == user_id).all()]

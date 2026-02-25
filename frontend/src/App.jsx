@@ -27,6 +27,18 @@ export function App() {
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
+  const [chatMedia, setChatMedia] = useState(null)
+  const [chatError, setChatError] = useState('')
+  const [slowmodeNotice, setSlowmodeNotice] = useState('')
+  const wsRef = useRef(null)
+  const syncWsRef = useRef(null)
+  const slowmodeTimerRef = useRef(null)
+  const [showRoomModal, setShowRoomModal] = useState(false)
+  const chatFileInputRef = useRef(null)
+  const [newRoomName, setNewRoomName] = useState('')
+  const [newRoomAvatar, setNewRoomAvatar] = useState('')
+  const [joinCodeInput, setJoinCodeInput] = useState('')
+  const [roomMembers, setRoomMembers] = useState([])
 
   const [commentModalPost, setCommentModalPost] = useState(null)
   const [comments, setComments] = useState([])
@@ -36,6 +48,8 @@ export function App() {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token])
   const isBoss = me?.role === 'boss'
+  const selectedRoom = rooms.find((r) => r.id === selectedRoomId)
+  const canManageSelectedRoom = !!selectedRoom?.can_manage
 
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
@@ -58,13 +72,21 @@ export function App() {
     }
   }
 
+  const loadRooms = async () => {
+    const { data: roomData } = await api.get('/api/rooms', { headers })
+    setRooms(roomData)
+    setSelectedRoomId((prev) => {
+      if (!roomData.length) return null
+      if (prev && roomData.some((r) => r.id === prev)) return prev
+      return (roomData.find((r) => r.name === 'global') || roomData[0]).id
+    })
+  }
+
   const loadBase = async () => {
     const meResp = await api.get('/api/me', { headers })
     setMe(meResp.data)
     await loadChannels()
-    const { data: roomData } = await api.get('/api/rooms')
-    setRooms(roomData)
-    if (roomData.length) setSelectedRoomId((roomData.find((r) => r.name === 'global') || roomData[0]).id)
+    await loadRooms()
   }
 
   useEffect(() => {
@@ -80,8 +102,83 @@ export function App() {
 
   useEffect(() => {
     if (!token || !selectedRoomId) return
-    api.get(`/api/chat/messages/${selectedRoomId}`).then((r) => setChat(r.data))
+    api.get(`/api/chat/messages/${selectedRoomId}`, { headers }).then((r) => setChat(r.data))
+  }, [token, selectedRoomId, headers])
+
+
+  useEffect(() => () => {
+    if (slowmodeTimerRef.current) clearTimeout(slowmodeTimerRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (!token || !selectedRoomId) return
+    api.get(`/api/rooms/${selectedRoomId}/members`, { headers }).then((r) => setRoomMembers(r.data)).catch(() => setRoomMembers([]))
+  }, [token, selectedRoomId, headers])
+
+  useEffect(() => {
+    if (!token || !selectedRoomId) return
+    const wsBase = api.defaults.baseURL.replace('http://', 'ws://').replace('https://', 'wss://')
+    const ws = new WebSocket(`${wsBase}/ws/room-${selectedRoomId}`)
+    wsRef.current = ws
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload.type === 'message_created' && payload.room_id === selectedRoomId) {
+          setChat((prev) => (prev.some((m) => m.id === payload.message.id) ? prev : [...prev, payload.message]))
+        }
+        if (payload.type === 'message_deleted' && payload.room_id === selectedRoomId) {
+          setChat((prev) => prev.filter((m) => m.id !== payload.message_id))
+        }
+      } catch {
+        // noop
+      }
+    }
+    return () => {
+      ws.close()
+      wsRef.current = null
+    }
   }, [token, selectedRoomId])
+
+
+  useEffect(() => {
+    if (!token) return
+    const intervalId = setInterval(async () => {
+      try {
+        await Promise.all([loadChannels(), loadRooms()])
+      } catch {
+        // noop
+      }
+    }, 3000)
+    return () => clearInterval(intervalId)
+  }, [token, headers])
+
+  useEffect(() => {
+    if (!token) return
+    const wsBase = api.defaults.baseURL.replace('http://', 'ws://').replace('https://', 'wss://')
+    const ws = new WebSocket(`${wsBase}/ws/system-sync`)
+    syncWsRef.current = ws
+    ws.onmessage = async (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+        if (payload.type === 'channels_changed') {
+          await loadChannels()
+        }
+        if (payload.type === 'rooms_changed') {
+          await loadRooms()
+        }
+        if (payload.type === 'posts_changed') {
+          await loadChannels()
+          await loadFeed(false)
+        }
+      } catch {
+        // noop
+      }
+    }
+    return () => {
+      ws.close()
+      syncWsRef.current = null
+    }
+  }, [token, headers])
 
   const login = async (e) => {
     e.preventDefault()
@@ -133,6 +230,7 @@ export function App() {
       audio_url: '',
       channel_id: selectedChannelId,
     }, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'posts_changed' }))
     setNewPostText('')
     setPostMedia(null)
     await Promise.all([loadFeed(false), loadChannels()])
@@ -141,6 +239,7 @@ export function App() {
   const createChannel = async () => {
     if (!newChannelName.trim()) return
     await api.post('/api/channels', { name: newChannelName, avatar_url: newChannelAvatar }, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'channels_changed' }))
     setNewChannelName('')
     setNewChannelAvatar('')
     setShowChannelModal(false)
@@ -149,6 +248,7 @@ export function App() {
 
   const deleteChannel = async (channelId) => {
     await api.delete(`/api/channels/${channelId}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'channels_changed' }))
     await loadChannels()
     if (selectedChannelId === channelId) {
       setSelectedChannelId(null)
@@ -163,6 +263,7 @@ export function App() {
 
   const deletePost = async (id) => {
     await api.delete(`/api/news/${id}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'posts_changed' }))
     await Promise.all([loadFeed(false), loadChannels()])
   }
 
@@ -189,11 +290,71 @@ export function App() {
   }
 
   const sendMessage = async () => {
-    if (!selectedRoomId || !message.trim()) return
-    const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message }, { headers })
-    setChat((prev) => [...prev, data])
-    setMessage('')
+    if (!selectedRoomId || (!message.trim() && !chatMedia)) return
+    setChatError('')
+    try {
+      const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message, media_url: chatMedia?.url || '', media_type: chatMedia?.type || '' }, { headers })
+      setChat((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data]))
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'message_created', room_id: selectedRoomId, message: data }))
+      }
+      setMessage('')
+      setChatMedia(null)
+      setSlowmodeNotice('')
+    } catch (err) {
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'object' && detail?.code === 'SLOWMODE') {
+        const seconds = Number(detail.retry_after_seconds || 0)
+        const mins = Math.floor(seconds / 60)
+        const secs = seconds % 60
+        const fmt = mins > 0 ? `${mins}м ${secs}с` : `${secs}с`
+        setSlowmodeNotice(`В чате установлен слоумод, вы сможете отправить сообщение через ${fmt}`)
+        if (slowmodeTimerRef.current) clearTimeout(slowmodeTimerRef.current)
+        slowmodeTimerRef.current = setTimeout(() => setSlowmodeNotice(''), 2500)
+      } else {
+        setChatError(detail || 'Не удалось отправить сообщение')
+      }
+    }
   }
+
+  const createRoom = async () => {
+    if (!newRoomName.trim()) return
+    await api.post('/api/rooms', { name: newRoomName, avatar_url: newRoomAvatar }, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'rooms_changed' }))
+    setNewRoomName('')
+    setNewRoomAvatar('')
+    setShowRoomModal(false)
+    await loadRooms()
+  }
+
+  const deleteRoom = async (roomId) => {
+    await api.delete(`/api/rooms/${roomId}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'rooms_changed' }))
+    await loadRooms()
+  }
+
+  const patchRoomSettings = async (changes) => {
+    if (!selectedRoomId) return
+    const { data } = await api.patch(`/api/rooms/${selectedRoomId}`, changes, { headers })
+    setRooms((prev) => prev.map((r) => (r.id === data.id ? data : r)))
+  }
+
+  const joinByCode = async () => {
+    if (!joinCodeInput.trim()) return
+    await api.get(`/api/rooms/join/${joinCodeInput.trim().toUpperCase()}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'rooms_changed' }))
+    setJoinCodeInput('')
+    await loadRooms()
+  }
+
+  const removeMessage = async (id) => {
+    await api.delete(`/api/chat/messages/${id}`, { headers })
+    setChat((prev) => prev.filter((m) => m.id !== id))
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'message_deleted', room_id: selectedRoomId, message_id: id }))
+    }
+  }
+
 
   if (!token) {
     return <div className="auth-page"><form className="auth-card card" onSubmit={authMode === 'login' ? login : register}><h1>{authMode === 'login' ? 'Вход' : 'Регистрация'}</h1>{authError && <div className="auth-error">{authError}</div>}<input name="username" placeholder="Логин" required /><input name="password" type="password" placeholder="Пароль" required />{authMode === 'register' && <input name="confirmPassword" type="password" placeholder="Повторите пароль" required />}<button type="submit">{authMode === 'login' ? 'Войти' : 'Создать аккаунт'}</button><button type="button" className="link-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Вход'}</button></form></div>
@@ -244,11 +405,55 @@ export function App() {
         </main>
       )}
 
-      {activeTab === 'chat' && <main className="chat-page card"><h2>Чат</h2><div className="chat-rooms">{rooms.map((r) => <button key={r.id} className={selectedRoomId === r.id ? 'tab active' : 'tab'} onClick={() => setSelectedRoomId(r.id)}>{r.name}</button>)}</div><div className="chat-box">{chat.map((m, i) => <div key={m.id || i}>{m.content}</div>)}</div><div className="chat-input"><input value={message} onChange={(e) => setMessage(e.target.value)} /><button onClick={sendMessage}>Отправить</button></div></main>}
+      {activeTab === 'chat' && (
+        <main className="chat-layout card">
+          <aside className="channels-sidebar">
+            <div className="channels-header">Чаты <span>|</span><button onClick={() => setShowRoomModal(true)} className="add-channel-btn">+</button></div>
+            <div className="chat-code-top"><div className="join-input-wrap"><input value={joinCodeInput} onChange={(e) => setJoinCodeInput(e.target.value)} placeholder="Вступить в чат по коду" /><button className="join-inline-btn" onClick={joinByCode}>✓</button></div></div>
+            <div className="channels-list">
+              {rooms.map((r) => (
+                <button key={r.id} className={`channel-item ${selectedRoomId === r.id ? 'active' : ''}`} onClick={() => setSelectedRoomId(r.id)}>
+                  <img src={r.avatar_url ? `${api.defaults.baseURL}${r.avatar_url}` : 'https://placehold.co/40x40/1f2433/ffffff?text=C'} alt={r.name} />
+                  <div className="channel-main"><span>{r.name}</span>{r.is_main && <small>main</small>}</div>
+                </button>
+              ))}
+            </div>
+          </aside>
+
+          <section className="posts-column">
+            <section className="posts-scroll-block chat-box no-radius">
+              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {m.media_url && <img className="chat-inline-image" src={`${api.defaults.baseURL}${m.media_url}`} alt="chat-media" />} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
+            </section>
+            <div className="chat-input-wrap">
+            {slowmodeNotice && <div className="slowmode-notice">{slowmodeNotice}</div>}
+            {chatMedia && <div className="chat-media-preview"><img src={`${api.defaults.baseURL}${chatMedia.url}`} alt="preview" /></div>}
+            <div className="chat-input no-radius">
+              <button type="button" className="clip-btn" onClick={() => chatFileInputRef.current?.click()}>📎</button>
+              <input type="file" ref={chatFileInputRef} style={{ display: "none" }} accept="image/*" onChange={async (e) => e.target.files?.[0] && setChatMedia(await uploadMedia(e.target.files[0]))} />
+              <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
+              <button className="post-send-btn" onClick={sendMessage}>➤</button>
+            </div>
+            </div>
+            {chatError && <div className="auth-error">{chatError}</div>}
+          </section>
+
+          <aside className="chat-settings">
+            <h3>Настройки чата</h3>
+            {selectedRoom && canManageSelectedRoom ? <>
+              <div className="setting-row"><span>Медиа</span><label className="switch"><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => patchRoomSettings({ allow_media: e.target.checked })} /><span className="slider" /></label></div>
+              <div className="setting-row cooldown-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label><input className="cooldown-input" type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value), cooldown_enabled: false })} placeholder="сек" /></div>
+              <div className="setting-row"><span>Код входа</span><div className="join-code-value inline">{selectedRoom.join_code || '—'}</div></div>
+              <div className="chat-members"><div className="chat-members-title">Участники</div>{roomMembers.map((member) => <div key={member.id} className="chat-member-item" style={{ color: member.nickname_color || '#cfd8ff' }}>{member.username}{member.role === 'boss' ? ' #босс' : ''}</div>)}</div>
+              {!selectedRoom.is_main && <button className="danger-btn" onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
+            </> : <p>Недостаточно прав для настройки.</p>}
+          </aside>
+        </main>
+      )}
       {activeTab === 'profile' && <main className="card"><h2>Профиль</h2><p>{me.username} ({me.role})</p></main>}
       {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
+      {showRoomModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый чат</h3><input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Название чата" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewRoomAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowRoomModal(false)}>Отмена</button><button onClick={createRoom}>Создать</button></div></div></div>}
 
       {commentModalPost && <div className="modal-backdrop"><div className="modal card"><div className="comments-header"><button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button><span className="header-sep">|</span><h3>Комментарии</h3></div><div className="comments-list fixed" ref={commentsRef}>{comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}<button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button></div><div className="comment-input-wrap"><input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" /><div className="comment-actions-right"><button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button><button className="send-inline" onClick={sendComment}>›</button>{showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}</div></div></div></div>}
     </div>
