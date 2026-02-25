@@ -34,7 +34,6 @@ export function App() {
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
-  const [myJoinCode, setMyJoinCode] = useState('')
   const [joinCodeInput, setJoinCodeInput] = useState('')
 
   const [commentModalPost, setCommentModalPost] = useState(null)
@@ -275,12 +274,6 @@ export function App() {
     setRooms((prev) => prev.map((r) => (r.id === data.id ? data : r)))
   }
 
-  const fetchJoinCode = async () => {
-    if (!selectedRoomId || !canManageSelectedRoom) return
-    const { data } = await api.get(`/api/rooms/${selectedRoomId}/join-code`, { headers })
-    setMyJoinCode(data.join_code || '')
-  }
-
   const joinByCode = async () => {
     if (!joinCodeInput.trim()) return
     await api.get(`/api/rooms/join/${joinCodeInput.trim().toUpperCase()}`, { headers })
@@ -379,11 +372,9 @@ export function App() {
             <h3>Настройки чата</h3>
             {selectedRoom && canManageSelectedRoom ? <>
               <div className="setting-row"><span>Медиа</span><label className="switch"><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => patchRoomSettings({ allow_media: e.target.checked })} /><span className="slider" /></label></div>
-              <div className="setting-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label></div>
-              <input type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value) })} placeholder="Секунды кулдауна" />
-              <div className="setting-row"><span>Код входа</span><button onClick={fetchJoinCode}>Показать</button></div>
-              {myJoinCode && <div className="join-code-value">{myJoinCode}</div>}
-              {!selectedRoom.is_main && <button onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
+              <div className="setting-row cooldown-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label><input className="cooldown-input" type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value), cooldown_enabled: false })} placeholder="сек" /></div>
+              <div className="setting-row"><span>Код входа</span><div className="join-code-value inline">{selectedRoom.join_code || '—'}</div></div>
+              {!selectedRoom.is_main && <button className="danger-btn" onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
             </> : <p>Недостаточно прав для настройки.</p>}
           </aside>
         </main>
