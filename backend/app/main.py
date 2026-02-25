@@ -467,6 +467,33 @@ def join_room(join_code: str, user: User = Depends(get_current_user), db: Sessio
     return _room_to_dict(room, user)
 
 
+@app.get("/api/rooms/{room_id}/members")
+def room_members(room_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(404, "Room not found")
+    is_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == user.id).first()
+    if not is_member and not (room.is_main and user.role == "boss"):
+        raise HTTPException(403, "You are not a member of this room")
+
+    rows = (
+        db.query(User.id, User.username, User.role, RoomMember.nickname_color)
+        .join(RoomMember, RoomMember.user_id == User.id)
+        .filter(RoomMember.room_id == room_id)
+        .order_by(User.username.asc())
+        .all()
+    )
+    return [
+        {
+            "id": user_id,
+            "username": username,
+            "role": role,
+            "nickname_color": color or _pastel_from_seed(room_id, user_id),
+        }
+        for user_id, username, role, color in rows
+    ]
+
+
 @app.post("/api/chat/messages")
 def send_message(payload: MessageIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.id == payload.room_id).first()
@@ -504,7 +531,7 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
             db.add(state)
         state.last_message_at = datetime.utcnow()
 
-    msg = Message(room_id=payload.room_id, user_id=user.id, content=content or "[media]", media_url=media_url, media_type=media_type)
+    msg = Message(room_id=payload.room_id, user_id=user.id, content=content or "", media_url=media_url, media_type=media_type)
     db.add(msg)
     db.commit()
     db.refresh(msg)

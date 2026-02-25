@@ -80,7 +80,7 @@
 .switch input:checked + .slider{background:#34c759}
 .switch input:checked + .slider:before{transform:translateX(20px)}
 
-.chat-code-top{padding:8px 10px;border-bottom:1px solid #3a4460}
+.chat-code-top{padding:0;border-bottom:0}
 .join-code-value{font-weight:700;letter-spacing:1px;padding:6px 8px;border:1px solid #3a4460;background:#111623}
 .chat-input.no-radius input:focus,.chat-input.no-radius input:focus-visible{outline:none !important;box-shadow:none !important;border:0 !important}
 .chat-code-top input:focus,.chat-code-top input:focus-visible{outline:none;box-shadow:none}
@@ -94,8 +94,10 @@
 .join-code-value.inline{border-radius:0;padding:4px 8px;min-width:90px;text-align:center}
 .danger-btn{background:#582a37 !important;border-color:#7e3b4f !important;color:#ffd5de !important}
 
-.join-input-wrap{position:relative}.join-input-wrap input{width:100%;padding-right:34px}.join-inline-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:transparent !important;border:0 !important;padding:0 !important}
+.join-input-wrap{position:relative;width:100%}.join-input-wrap input{width:100%;padding:10px 34px 10px 10px;border:0 !important;border-radius:0 !important;background:#111623}.join-input-wrap input:focus,.join-input-wrap input:focus-visible{outline:none;box-shadow:none;border:0}.join-inline-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent !important;border:0 !important;padding:0 !important}
 .chat-input.no-radius{display:grid;grid-template-columns:34px 1fr 28px;align-items:center;gap:6px}
 .chat-input.no-radius .clip-btn{font-size:18px;padding:0;border:0;background:transparent}
 .chat-media-preview{border:1px solid #3a4460;border-bottom:0;background:#111623}.chat-media-preview img{display:block;max-height:120px;max-width:100%;object-fit:cover}
 .chat-inline-image{max-width:180px;max-height:140px;display:block;border:1px solid #3a4460}
+
+.chat-members{margin-top:6px;border:1px solid #3a4460;background:#111623;max-height:180px;overflow:auto}.chat-members-title{padding:6px 8px;border-bottom:1px solid #3a4460;font-size:12px;color:#aab4d2}.chat-member-item{padding:6px 8px;border-bottom:1px solid #2a3248}.chat-member-item:last-child{border-bottom:0}
