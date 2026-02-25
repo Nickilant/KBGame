@@ -166,6 +166,10 @@ export function App() {
         if (payload.type === 'rooms_changed') {
           await loadRooms()
         }
+        if (payload.type === 'posts_changed') {
+          await loadChannels()
+          await loadFeed(false)
+        }
       } catch {
         // noop
       }
@@ -226,6 +230,7 @@ export function App() {
       audio_url: '',
       channel_id: selectedChannelId,
     }, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'posts_changed' }))
     setNewPostText('')
     setPostMedia(null)
     await Promise.all([loadFeed(false), loadChannels()])
@@ -258,6 +263,7 @@ export function App() {
 
   const deletePost = async (id) => {
     await api.delete(`/api/news/${id}`, { headers })
+    if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'posts_changed' }))
     await Promise.all([loadFeed(false), loadChannels()])
   }
 
