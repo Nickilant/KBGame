@@ -85,6 +85,7 @@ export function App() {
     ring2: null,
   })
   const [inventory, setInventory] = useState([])
+  const [inventoryModalItem, setInventoryModalItem] = useState(null)
   const [uniqueAbilities] = useState(Array(10).fill(null))
   const [adminUsers, setAdminUsers] = useState([])
   const [adminItems, setAdminItems] = useState([])
@@ -934,19 +935,18 @@ export function App() {
 
           <section className="inventory-panel card">
             <h3>Инвентарь</h3>
-            <div className="inventory-list">
+            <div className="inventory-grid">
               {inventory.length === 0 && <p className="inventory-empty">Инвентарь пуст.</p>}
               {inventory.map((item) => (
-                <article key={item.inventory_entry_id || `${item.id}-${item.name}`} className="inventory-item">
-                  <div>
-                    <h4>{item.name}</h4>
-                    <p>{item.description || 'Описание появится позже'}</p>
-                    <small>
-                      HP +{item.hp_bonus || 0} · Урон +{item.attack_bonus || 0} · Защита +{item.defense_bonus || 0} · Точность +{item.accuracy_bonus || 0}% · Скорость +{item.attack_speed_bonus || 0}
-                    </small>
-                  </div>
-                  <button onClick={() => equipItem(item)}>Экипировать</button>
-                </article>
+                <button
+                  key={item.inventory_entry_id || `${item.id}-${item.name}`}
+                  type="button"
+                  className="inventory-tile"
+                  onClick={() => setInventoryModalItem(item)}
+                >
+                  <img src={item.image_url ? toApiMediaUrl(item.image_url) : 'https://placehold.co/72x72/131a2c/fff?text=I'} alt={item.name} />
+                  <span>{item.name}</span>
+                </button>
               ))}
             </div>
           </section>
@@ -1115,6 +1115,25 @@ export function App() {
 
 
       {imageViewer.open && <div className="image-viewer-overlay" onClick={closeImageViewer}><button type="button" className="image-viewer-close" onClick={(e) => { e.stopPropagation(); closeImageViewer() }}>✕</button><div className="image-viewer-edge left" onClick={(e) => { e.stopPropagation(); switchViewerImage(-1) }}><button type="button" className="image-viewer-arrow" aria-label="Предыдущее изображение">❮</button></div><img className="image-viewer-photo" src={`${api.defaults.baseURL}${imageViewer.images[imageViewer.index]}`} alt="full" onClick={(e) => e.stopPropagation()} /><div className="image-viewer-edge right" onClick={(e) => { e.stopPropagation(); switchViewerImage(1) }}><button type="button" className="image-viewer-arrow" aria-label="Следующее изображение">❯</button></div></div>}
+
+      {inventoryModalItem && (
+        <div className="modal-backdrop" onClick={() => setInventoryModalItem(null)}>
+          <div className="modal card inventory-item-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="inventory-modal-close" onClick={() => setInventoryModalItem(null)}>✕</button>
+            <img src={inventoryModalItem.image_url ? toApiMediaUrl(inventoryModalItem.image_url) : 'https://placehold.co/112x112/131a2c/fff?text=I'} alt={inventoryModalItem.name} />
+            <h3>{inventoryModalItem.name}</h3>
+            <p>{inventoryModalItem.description || 'Описание появится позже'}</p>
+            <div className="inventory-modal-stats">
+              <small>HP +{inventoryModalItem.hp_bonus || 0}</small>
+              <small>Урон +{inventoryModalItem.attack_bonus || 0}</small>
+              <small>Защита +{inventoryModalItem.defense_bonus || 0}</small>
+              <small>Точность +{inventoryModalItem.accuracy_bonus || 0}%</small>
+              <small>Скорость +{inventoryModalItem.attack_speed_bonus || 0}</small>
+            </div>
+            <button className="inventory-modal-equip" onClick={() => { equipItem(inventoryModalItem); setInventoryModalItem(null) }}>Экипировать</button>
+          </div>
+        </div>
+      )}
 
       {commentModalPost && <div className="modal-backdrop"><div className="modal card"><div className="comments-header"><button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button><span className="header-sep">|</span><h3>Комментарии</h3></div><div className="comments-list fixed" ref={commentsRef}>{comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}<button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button></div><div className="comment-input-wrap"><input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" /><div className="comment-actions-right"><button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button><button className="send-inline" onClick={sendComment}>›</button>{showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}</div></div></div></div>}
     </div>
