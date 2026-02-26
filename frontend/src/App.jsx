@@ -746,9 +746,21 @@ export function App() {
 
   useEffect(() => {
     if (!token || activeTab !== 'profile') return
-    loadInventory().catch(() => {
-      // noop
-    })
+
+    const refreshInventory = () => {
+      loadInventory().catch(() => {
+        // noop
+      })
+    }
+
+    refreshInventory()
+    const inventoryPoll = setInterval(refreshInventory, 10000)
+    window.addEventListener('focus', refreshInventory)
+
+    return () => {
+      clearInterval(inventoryPoll)
+      window.removeEventListener('focus', refreshInventory)
+    }
   }, [token, activeTab])
 
 
