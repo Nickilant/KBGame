@@ -112,6 +112,7 @@ class LootUpdateIn(BaseModel):
 
 class ItemCreateIn(BaseModel):
     image_url: str
+    slot: str = "weapon"
     name: str
     description: str
     hp_bonus: int = 0

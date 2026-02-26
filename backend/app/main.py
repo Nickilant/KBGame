@@ -88,6 +88,7 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS accuracy_bonus INTEGER DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS attack_speed_bonus DOUBLE PRECISION DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS unique_skill VARCHAR(255)"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS slot VARCHAR(32) DEFAULT 'weapon'"))
 
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS room_members (
@@ -983,11 +984,17 @@ def update_loot(item_id: int, payload: LootUpdateIn, _: User = Depends(require_r
 
 @app.post("/api/master-admin/items")
 def create_item(payload: ItemCreateIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
+    allowed_slots = {"weapon", "shield", "helmet", "armor", "boots", "amulet", "ring"}
+    slot = (payload.slot or "weapon").strip().lower()
+    if slot not in allowed_slots:
+        raise HTTPException(400, "Unsupported item slot")
+
     item = Item(
         name=payload.name.strip(),
         description=payload.description.strip(),
         rarity="custom",
         image_url=payload.image_url,
+        slot=slot,
         hp_bonus=payload.hp_bonus,
         attack_bonus=payload.attack_bonus,
         defense_bonus=payload.defense_bonus,
@@ -1022,11 +1029,11 @@ def admin_list_items(_: User = Depends(require_roles("master_admin", "admin")), 
     )
     return [
         {
-            "inventory_entry_id": inv.id,
             "id": item.id,
             "name": item.name,
             "description": item.description,
             "image_url": item.image_url,
+            "slot": item.slot or "weapon",
             "hp_bonus": item.hp_bonus,
             "attack_bonus": item.attack_bonus,
             "defense_bonus": item.defense_bonus,
@@ -1071,11 +1078,11 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
     )
     return [
         {
-            "inventory_entry_id": inv.id,
             "id": item.id,
             "name": item.name,
             "description": item.description,
             "image_url": item.image_url,
+            "slot": item.slot or "weapon",
             "hp_bonus": item.hp_bonus,
             "attack_bonus": item.attack_bonus,
             "defense_bonus": item.defense_bonus,

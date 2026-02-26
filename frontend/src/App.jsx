@@ -95,6 +95,7 @@ export function App() {
   const [adminItemError, setAdminItemError] = useState('')
   const [newItem, setNewItem] = useState({
     image_url: '',
+    slot: 'weapon',
     name: '',
     description: '',
     hp_bonus: 0,
@@ -672,7 +673,7 @@ export function App() {
         defense_bonus: Number(newItem.defense_bonus || 0),
         accuracy_bonus: Number(newItem.accuracy_bonus || 0),
       }, { headers })
-      setNewItem({ image_url: '', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
+      setNewItem({ image_url: '', slot: 'weapon', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
       await loadAdminPanel()
     } catch (err) {
       setAdminItemError(err.response?.data?.detail || 'Не удалось создать предмет')
@@ -937,6 +938,16 @@ export function App() {
               <input ref={adminItemImageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={async (e) => { if (!e.target.files?.[0]) return; const uploaded = await uploadMedia(e.target.files[0]); setNewItem((p) => ({ ...p, image_url: uploaded.url })); e.target.value = '' }} />
               <button type="button" onClick={() => adminItemImageInputRef.current?.click()}>Загрузить с ПК</button>
               {newItem.image_url && <img src={`${api.defaults.baseURL}${newItem.image_url}`} alt="item-preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #3a4460' }} />}
+              <label>Тип предмета (слот)</label>
+              <select value={newItem.slot} onChange={(e) => setNewItem((p) => ({ ...p, slot: e.target.value }))}>
+                <option value="weapon">Оружие</option>
+                <option value="shield">Щит</option>
+                <option value="helmet">Шлем</option>
+                <option value="armor">Броня</option>
+                <option value="boots">Обувь</option>
+                <option value="amulet">Амулет</option>
+                <option value="ring">Кольцо</option>
+              </select>
               <label>Название предмета</label>
               <input value={newItem.name} placeholder="Название" onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
               <label>Описание предмета</label>

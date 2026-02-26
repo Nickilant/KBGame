@@ -49,6 +49,7 @@ class Item(Base):
     accuracy_bonus = Column(Integer, default=0)
     attack_speed_bonus = Column(Float, default=0)
     image_url = Column(String(255), default="")
+    slot = Column(String(32), default="weapon")
     unique_skill = Column(String(255), nullable=True)
     drop_chance = Column(Float, default=0.1)
 
@@ -140,6 +141,7 @@ class Post(Base):
     title = Column(String(128), nullable=False)
     content = Column(Text, nullable=False)
     image_url = Column(String(255), default="")
+    slot = Column(String(32), default="weapon")
     video_url = Column(String(255), default="")
     audio_url = Column(String(255), default="")
     media_urls = Column(JSON, default=list)
