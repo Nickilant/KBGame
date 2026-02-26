@@ -35,6 +35,7 @@ export function App() {
   const [postMedia, setPostMedia] = useState([])
   const [uploading, setUploading] = useState(false)
   const [hoveredPostId, setHoveredPostId] = useState(null)
+  const [postContextMenu, setPostContextMenu] = useState({ open: false, x: 0, y: 0, postId: null })
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [newChannelName, setNewChannelName] = useState('')
   const [newChannelAvatar, setNewChannelAvatar] = useState('')
@@ -288,6 +289,17 @@ export function App() {
     setRoomNameDraft(selectedRoom?.name || '')
   }, [selectedRoom?.id, selectedRoom?.name])
 
+
+  useEffect(() => {
+    if (!postContextMenu.open) return
+    const close = () => setPostContextMenu({ open: false, x: 0, y: 0, postId: null })
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [postContextMenu.open])
   useEffect(() => {
     if (!imageViewer.open) return
     const handleKeyDown = (event) => {
@@ -729,11 +741,10 @@ export function App() {
               {posts.map((p) => {
                 const postImages = (p.media_urls?.length ? p.media_urls : (p.image_url ? [p.image_url] : []))
                 return (
-                <div key={p.id} className="post-shell" onMouseEnter={() => setHoveredPostId(p.id)} onMouseLeave={() => setHoveredPostId(null)}>
+                <div key={p.id} className="post-shell" onMouseEnter={() => setHoveredPostId(p.id)} onMouseLeave={() => setHoveredPostId(null)} onContextMenu={(e) => { if (!isBoss) return; e.preventDefault(); setPostContextMenu({ open: true, x: e.clientX, y: e.clientY, postId: p.id }) }}>
                   <article id={`post-${p.id}`} className="tg-post card" onClick={() => markRead(p.id)}>
                     {postImages.length > 0 && <div className="post-media-grid">{postImages.map((url, idx) => <button type="button" key={`${url}-${idx}`} className="post-media-button" onClick={(e) => { e.stopPropagation(); openImageViewer(postImages, idx) }}><img className="post-image" src={`${api.defaults.baseURL}${url}`} alt="media" /></button>)}</div>}
                     {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
-                    {isBoss && <button className="delete-post-btn" onClick={(e) => { e.stopPropagation(); deletePost(p.id) }} aria-label="Удалить пост">✕</button>}
                     <div className="post-body">
                       <p className="post-text">{p.content}</p>
                       <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
@@ -749,6 +760,7 @@ export function App() {
 
             {isBoss && <form className="post-input-wrap" onSubmit={createPost}>{postMedia.length > 0 && <div className="composer-preview thumbs">{postMedia.map((m, idx) => <div key={`${m.url}-${idx}`} className="preview-thumb-wrap"><img src={`${api.defaults.baseURL}${m.url}`} alt="preview" /><button type="button" className="preview-remove" onClick={() => removeMediaAttachment(idx, setPostMedia)}>✕</button></div>)}</div>}<div className="post-input-row"><button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button><span className="input-v-sep" aria-hidden="true">|</span><input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept="image/*" onChange={async (e) => { if (e.target.files?.length) await addMediaAttachment(e.target.files, setPostMedia); e.target.value = '' }} /><input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" /><button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button></div></form>}
           </section>
+          {postContextMenu.open && <div className="post-context-menu" style={{ left: postContextMenu.x, top: postContextMenu.y }} onClick={(e) => e.stopPropagation()}><button type="button" className="post-context-delete" onClick={async () => { if (!postContextMenu.postId) return; await deletePost(postContextMenu.postId); setPostContextMenu({ open: false, x: 0, y: 0, postId: null }) }}>Удалить пост</button></div>}
         </main>
       )}
 
