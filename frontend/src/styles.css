@@ -20,7 +20,7 @@
 .posts-scroll-block{flex:1;overflow:auto;border:1px solid #3a4460;border-bottom:0;border-radius:0;padding:10px;background:#121726}
 .post-shell{position:relative;width:min(760px, calc(100% - 220px));margin-right:auto;margin-bottom:10px;padding-right:56px}
 .tg-post{position:relative;width:100%;margin-right:auto;margin-bottom:0;background:#1a2030;padding:0;overflow:hidden}
-.post-image,.post-video{width:100%;max-height:360px;object-fit:cover;border-radius:0;border:0;display:block}
+.post-image,.post-video{width:100%;max-height:360px;object-fit:contain;border-radius:0;border:0;display:block}
 .post-body{padding:10px 12px}
 .post-text{margin-top:8px}
 .post-meta{color:#b7c1db;font-size:13px;margin:6px 0;display:flex;justify-content:flex-end}.views-right{text-align:right}
@@ -154,9 +154,20 @@
 @media (max-width:960px){.profile-page{grid-template-columns:1fr;grid-template-areas:"overview" "equipment" "abilities" "inventory"}.profile-overview{grid-template-columns:1fr}.admin-page{grid-template-columns:1fr}.admin-user-controls{grid-template-columns:1fr}.admin-boss-form{grid-template-columns:1fr}}
 
 
-.post-media-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px}.post-media-grid .post-image{height:140px;width:100%;object-fit:cover}
+.post-media-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.post-media-button{border:0;background:transparent;padding:0;cursor:zoom-in}.post-media-grid .post-image{width:100%;max-height:240px;height:auto;object-fit:contain;background:#0d111d}
 .composer-preview.thumbs,.chat-media-preview.thumbs{display:flex;gap:8px;padding:8px;flex-wrap:wrap}
 .preview-thumb-wrap{position:relative;width:72px;height:72px;border:1px solid #3a4460;border-radius:8px;overflow:hidden}
 .preview-thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block}
 .preview-remove{position:absolute;top:2px;right:2px;width:16px;height:16px;padding:0;border-radius:50%;border:0;background:rgba(0,0,0,.7);font-size:10px;line-height:16px}
 .chat-user-avatar{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;font-size:10px;font-weight:700;color:#fff;flex:0 0 auto}
+
+
+.chat-user-avatar-image{width:18px;height:18px;border-radius:50%;image-rendering:pixelated;object-fit:cover;flex:0 0 auto}
+
+.image-viewer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:70;display:grid;place-items:center}
+.image-viewer-photo{width:100vw;height:100vh;object-fit:contain}
+.image-viewer-close{position:absolute;top:14px;right:16px;z-index:3;background:transparent;border:0;font-size:28px;color:#fff}
+.image-viewer-edge{position:absolute;top:0;bottom:0;width:16vw;z-index:2;display:flex;align-items:center}
+.image-viewer-edge.left{left:0;justify-content:flex-start}.image-viewer-edge.right{right:0;justify-content:flex-end}
+.image-viewer-arrow{opacity:0;transition:opacity .2s;background:transparent;border:0;font-size:52px;color:#fff;padding:0 10px}
+.image-viewer-edge:hover .image-viewer-arrow{opacity:1}

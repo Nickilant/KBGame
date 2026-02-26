@@ -58,6 +58,7 @@ export function App() {
   const [roomMembers, setRoomMembers] = useState([])
   const [roomNameDraft, setRoomNameDraft] = useState('')
   const chatSettingsAvatarInputRef = useRef(null)
+  const [imageViewer, setImageViewer] = useState({ open: false, images: [], index: 0 })
 
   const [commentModalPost, setCommentModalPost] = useState(null)
   const [comments, setComments] = useState([])
@@ -136,6 +137,20 @@ export function App() {
 
   const chatAvatarLetter = (name) => (name || '?').trim().slice(0, 1).toUpperCase()
 
+  const openImageViewer = (images, startIndex = 0) => {
+    if (!images?.length) return
+    setImageViewer({ open: true, images, index: Math.max(0, Math.min(startIndex, images.length - 1)) })
+  }
+
+  const closeImageViewer = () => setImageViewer({ open: false, images: [], index: 0 })
+
+  const switchViewerImage = (direction) => {
+    setImageViewer((prev) => {
+      if (!prev.open || prev.images.length < 2) return prev
+      const next = (prev.index + direction + prev.images.length) % prev.images.length
+      return { ...prev, index: next }
+    })
+  }
 
   const drawAvatarCanvas = (source) => {
     const canvas = avatarCanvasRef.current
@@ -270,6 +285,17 @@ export function App() {
   useEffect(() => {
     setRoomNameDraft(selectedRoom?.name || '')
   }, [selectedRoom?.id, selectedRoom?.name])
+
+  useEffect(() => {
+    if (!imageViewer.open) return
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') closeImageViewer()
+      if (event.key === 'ArrowLeft') switchViewerImage(-1)
+      if (event.key === 'ArrowRight') switchViewerImage(1)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [imageViewer.open])
 
   useEffect(() => {
     if (!token || !selectedRoomId) return
@@ -701,7 +727,7 @@ export function App() {
                 return (
                 <div key={p.id} className="post-shell" onMouseEnter={() => setHoveredPostId(p.id)} onMouseLeave={() => setHoveredPostId(null)}>
                   <article id={`post-${p.id}`} className="tg-post card" onClick={() => markRead(p.id)}>
-                    {postImages.length > 0 && <div className="post-media-grid">{postImages.map((url) => <img key={url} className="post-image" src={`${api.defaults.baseURL}${url}`} alt="media" />)}</div>}
+                    {postImages.length > 0 && <div className="post-media-grid">{postImages.map((url, idx) => <button type="button" key={`${url}-${idx}`} className="post-media-button" onClick={(e) => { e.stopPropagation(); openImageViewer(postImages, idx) }}><img className="post-image" src={`${api.defaults.baseURL}${url}`} alt="media" /></button>)}</div>}
                     {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
                     <div className="post-body">
                       <p className="post-text">{p.content}</p>
@@ -741,7 +767,7 @@ export function App() {
             <section className="posts-scroll-block chat-box no-radius">
               {chat.map((m, i) => {
                 const mediaItems = (m.media_urls?.length ? m.media_urls : (m.media_url ? [m.media_url] : []))
-                return <div key={m.id || i} className="chat-message"><span className="chat-user-avatar" style={{ backgroundColor: m.nickname_color || '#50608a' }}>{chatAvatarLetter(m.username || `#${m.user_id}`)}</span><b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {mediaItems.map((url) => <img key={url} className="chat-inline-image" src={`${api.defaults.baseURL}${url}`} alt="chat-media" />)} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>
+                return <div key={m.id || i} className="chat-message">{m.user_id === me?.id ? <img src={profileAvatarPixels || defaultAvatarImage} alt="avatar" className="chat-user-avatar-image" /> : <span className="chat-user-avatar" style={{ backgroundColor: m.nickname_color || '#50608a' }}>{chatAvatarLetter(m.username || `#${m.user_id}`)}</span>}<b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {mediaItems.map((url) => <img key={url} className="chat-inline-image" src={`${api.defaults.baseURL}${url}`} alt="chat-media" />)} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>
               })}
             </section>
             <div className="chat-input-wrap">
@@ -996,6 +1022,8 @@ export function App() {
         </div>
       )}
 
+
+      {imageViewer.open && <div className="image-viewer-overlay" onClick={closeImageViewer}><button type="button" className="image-viewer-close" onClick={(e) => { e.stopPropagation(); closeImageViewer() }}>✕</button><div className="image-viewer-edge left" onClick={(e) => { e.stopPropagation(); switchViewerImage(-1) }}><button type="button" className="image-viewer-arrow" aria-label="Предыдущее изображение">❮</button></div><img className="image-viewer-photo" src={`${api.defaults.baseURL}${imageViewer.images[imageViewer.index]}`} alt="full" onClick={(e) => e.stopPropagation()} /><div className="image-viewer-edge right" onClick={(e) => { e.stopPropagation(); switchViewerImage(1) }}><button type="button" className="image-viewer-arrow" aria-label="Следующее изображение">❯</button></div></div>}
 
       {commentModalPost && <div className="modal-backdrop"><div className="modal card"><div className="comments-header"><button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button><span className="header-sep">|</span><h3>Комментарии</h3></div><div className="comments-list fixed" ref={commentsRef}>{comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}<button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button></div><div className="comment-input-wrap"><input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" /><div className="comment-actions-right"><button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button><button className="send-inline" onClick={sendComment}>›</button>{showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}</div></div></div></div>}
     </div>
