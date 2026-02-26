@@ -238,11 +238,15 @@ export function App() {
     })
   }
 
+  const loadInventory = async () => {
+    const inventoryResp = await api.get('/api/inventory', { headers })
+    setInventory(inventoryResp.data)
+  }
+
   const loadBase = async () => {
     const meResp = await api.get('/api/me', { headers })
     setMe(meResp.data)
-    const inventoryResp = await api.get('/api/inventory', { headers })
-    setInventory(inventoryResp.data)
+    await loadInventory()
     await loadChannels()
     await loadRooms()
   }
@@ -598,7 +602,7 @@ export function App() {
       }
       return nextEquipped
     })
-    setInventory((prev) => prev.filter((invItem, idx) => (invItem.id !== item.id) || idx !== prev.findIndex((x) => x.id === item.id)))
+    setInventory((prev) => prev.filter((invItem) => invItem.inventory_entry_id !== item.inventory_entry_id))
   }
 
   const unequipItem = (slotKey) => {
@@ -710,6 +714,13 @@ export function App() {
       // noop
     })
   }, [token, isAdmin])
+
+  useEffect(() => {
+    if (!token || activeTab !== 'profile') return
+    loadInventory().catch(() => {
+      // noop
+    })
+  }, [token, activeTab])
 
 
   if (!token) {
@@ -875,7 +886,7 @@ export function App() {
             <div className="inventory-list">
               {inventory.length === 0 && <p className="inventory-empty">Инвентарь пуст.</p>}
               {inventory.map((item) => (
-                <article key={item.id} className="inventory-item">
+                <article key={item.inventory_entry_id || `${item.id}-${item.name}`} className="inventory-item">
                   <div>
                     <h4>{item.name}</h4>
                     <p>{item.description || 'Описание появится позже'}</p>

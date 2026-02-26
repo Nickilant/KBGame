@@ -1009,6 +1009,7 @@ def admin_list_items(_: User = Depends(require_roles("master_admin", "admin")), 
     )
     return [
         {
+            "inventory_entry_id": inv.id,
             "id": item.id,
             "name": item.name,
             "description": item.description,
@@ -1057,6 +1058,7 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
     )
     return [
         {
+            "inventory_entry_id": inv.id,
             "id": item.id,
             "name": item.name,
             "description": item.description,
