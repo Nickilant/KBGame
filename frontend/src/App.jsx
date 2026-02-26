@@ -613,15 +613,19 @@ export function App() {
   }
 
   const loadAdminPanel = async () => {
-    const [usersResp, itemsResp] = await Promise.all([
+    const [usersResult, itemsResult] = await Promise.allSettled([
       api.get('/api/master-admin/users', { headers }),
       api.get('/api/master-admin/items', { headers }),
     ])
-    setAdminUsers(usersResp.data)
-    setAdminItems(itemsResp.data)
+
+    const usersData = usersResult.status === 'fulfilled' ? usersResult.value.data : []
+    const itemsData = itemsResult.status === 'fulfilled' ? itemsResult.value.data : []
+
+    setAdminUsers(usersData)
+    setAdminItems(itemsData)
     setAdminUserDrafts((prev) => {
       const next = { ...prev }
-      usersResp.data.forEach((u) => {
+      usersData.forEach((u) => {
         next[u.id] = {
           role: prev[u.id]?.role ?? u.role,
           hp: prev[u.id]?.hp ?? u.hp,
@@ -633,8 +637,8 @@ export function App() {
       })
       return next
     })
-    if (!selectedGrantUserId && usersResp.data.length) {
-      setSelectedGrantUserId(String(usersResp.data[0].id))
+    if (!selectedGrantUserId && usersData.length) {
+      setSelectedGrantUserId(String(usersData[0].id))
     }
   }
 
