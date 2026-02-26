@@ -1078,6 +1078,7 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
     )
     return [
         {
+            "inventory_entry_id": inv.id,
             "id": item.id,
             "name": item.name,
             "description": item.description,

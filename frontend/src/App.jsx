@@ -5,6 +5,7 @@ const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://loca
 const ALL_REACTIONS = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😍','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤗','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌']
 const AVATAR_SIZE = 64
 const AVATAR_RADIUS = 32
+const toApiMediaUrl = (url) => (url && /^https?:\/\//i.test(url) ? url : `${api.defaults.baseURL}${url || ''}`)
 
 const createDefaultAvatar = () => {
   const canvas = document.createElement('canvas')
@@ -937,7 +938,7 @@ export function App() {
               <label>Картинка предмета</label>
               <input ref={adminItemImageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={async (e) => { if (!e.target.files?.[0]) return; const uploaded = await uploadMedia(e.target.files[0]); setNewItem((p) => ({ ...p, image_url: uploaded.url })); e.target.value = '' }} />
               <button type="button" onClick={() => adminItemImageInputRef.current?.click()}>Загрузить с ПК</button>
-              {newItem.image_url && <img src={`${api.defaults.baseURL}${newItem.image_url}`} alt="item-preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #3a4460' }} />}
+              {newItem.image_url && <img src={toApiMediaUrl(newItem.image_url)} alt="item-preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #3a4460' }} />}
               <label>Тип предмета (слот)</label>
               <select value={newItem.slot} onChange={(e) => setNewItem((p) => ({ ...p, slot: e.target.value }))}>
                 <option value="weapon">Оружие</option>
@@ -1025,7 +1026,7 @@ export function App() {
             <div className="admin-item-list">
               {adminItems.map((item) => (
                 <article key={item.id} className="admin-item-row">
-                  <img src={item.image_url || 'https://placehold.co/56x56/131a2c/fff?text=I'} alt={item.name} />
+                  <img src={item.image_url ? toApiMediaUrl(item.image_url) : 'https://placehold.co/56x56/131a2c/fff?text=I'} alt={item.name} />
                   <div>
                     <h4>{item.name}</h4>
                     <p>{item.description}</p>
