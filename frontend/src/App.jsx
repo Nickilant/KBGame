@@ -210,6 +210,28 @@ export function App() {
     { key: 'ring2', label: 'Кольцо II', accepted: 'ring' },
   ]
 
+
+  const createEmptyEquipmentState = () => ({
+    weapon: null,
+    shield: null,
+    helmet: null,
+    armor: null,
+    boots: null,
+    amulet: null,
+    ring1: null,
+    ring2: null,
+  })
+
+  const normalizeInventoryItem = (item) => ({
+    ...item,
+    bonuses: {
+      hp: item.hp_bonus || item.bonuses?.hp || 0,
+      damage: item.attack_bonus || item.bonuses?.damage || 0,
+      defense: item.defense_bonus || item.bonuses?.defense || 0,
+      accuracy: item.accuracy_bonus || item.bonuses?.accuracy || 0,
+      speed: item.attack_speed_bonus || item.bonuses?.speed || 0,
+    },
+  })
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
     setChannels(data)
@@ -245,7 +267,35 @@ export function App() {
 
   const loadInventory = async () => {
     const inventoryResp = await api.get('/api/inventory', { headers })
-    setInventory(inventoryResp.data)
+    const rows = Array.isArray(inventoryResp.data) ? inventoryResp.data : []
+
+    const nextEquipped = createEmptyEquipmentState()
+    const nextInventory = []
+
+    rows.forEach((rawItem) => {
+      const normalized = normalizeInventoryItem(rawItem)
+      if (!rawItem.equipped) {
+        nextInventory.push(normalized)
+        return
+      }
+
+      const slot = rawItem.slot || 'weapon'
+      if (slot === 'ring') {
+        if (!nextEquipped.ring1) nextEquipped.ring1 = normalized
+        else if (!nextEquipped.ring2) nextEquipped.ring2 = normalized
+        else nextInventory.push({ ...normalized, equipped: false })
+        return
+      }
+
+      if (Object.prototype.hasOwnProperty.call(nextEquipped, slot) && !nextEquipped[slot]) {
+        nextEquipped[slot] = normalized
+      } else {
+        nextInventory.push({ ...normalized, equipped: false })
+      }
+    })
+
+    setEquippedItems(nextEquipped)
+    setInventory(nextInventory)
   }
 
   const loadBase = async () => {
@@ -598,14 +648,8 @@ export function App() {
 
   const equipItem = (item) => {
     const normalized = {
-      ...item,
-      bonuses: {
-        hp: item.hp_bonus || item.bonuses?.hp || 0,
-        damage: item.attack_bonus || item.bonuses?.damage || 0,
-        defense: item.defense_bonus || item.bonuses?.defense || 0,
-        accuracy: item.accuracy_bonus || item.bonuses?.accuracy || 0,
-        speed: item.attack_speed_bonus || item.bonuses?.speed || 0,
-      },
+      ...normalizeInventoryItem(item),
+      equipped: true,
     }
     const targetSlot = item.slot === 'ring'
       ? (!equippedItems.ring1 ? 'ring1' : (!equippedItems.ring2 ? 'ring2' : 'ring1'))
@@ -615,7 +659,7 @@ export function App() {
       const previousInSlot = prev[targetSlot]
       const nextEquipped = { ...prev, [targetSlot]: normalized }
       if (previousInSlot) {
-        setInventory((invPrev) => [...invPrev, previousInSlot])
+        setInventory((invPrev) => [...invPrev, { ...previousInSlot, equipped: false }])
       }
       return nextEquipped
     })
@@ -625,7 +669,7 @@ export function App() {
   const unequipItem = (slotKey) => {
     const item = equippedItems[slotKey]
     if (!item) return
-    setInventory((prev) => [...prev, item])
+    setInventory((prev) => [...prev, { ...item, equipped: false }])
     setEquippedItems((prev) => ({ ...prev, [slotKey]: null }))
   }
 
