@@ -653,9 +653,12 @@ export function App() {
       })
       return next
     })
-    if (!selectedGrantUserId && usersData.length) {
-      setSelectedGrantUserId(String(usersData[0].id))
-    }
+    const playerUsers = usersData.filter((u) => u.role === 'player')
+    setSelectedGrantUserId((prev) => {
+      if (!playerUsers.length) return ''
+      if (prev && playerUsers.some((u) => String(u.id) === String(prev))) return prev
+      return String(playerUsers[0].id)
+    })
   }
 
   const createAdminItem = async () => {
@@ -682,7 +685,10 @@ export function App() {
   }
 
   const grantItemToUser = async (itemId) => {
-    if (!selectedGrantUserId) return
+    if (!selectedGrantUserId) {
+      alert('Выберите пользователя-игрока для выдачи предмета')
+      return
+    }
     await api.post(`/api/master-admin/items/${itemId}/grant`, {
       user_id: Number(selectedGrantUserId),
       quantity: Math.max(1, Number(grantQuantity || 1)),
