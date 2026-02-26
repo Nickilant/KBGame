@@ -91,6 +91,8 @@ export function App() {
   const [newBoss, setNewBoss] = useState({ name: '', hp: 1000, attack: 40, defense: 15 })
   const [selectedGrantUserId, setSelectedGrantUserId] = useState('')
   const [grantQuantity, setGrantQuantity] = useState(1)
+  const adminItemImageInputRef = useRef(null)
+  const [adminItemError, setAdminItemError] = useState('')
   const [newItem, setNewItem] = useState({
     image_url: '',
     name: '',
@@ -655,17 +657,26 @@ export function App() {
   }
 
   const createAdminItem = async () => {
-    await api.post('/api/master-admin/items', {
-      ...newItem,
-      unique_skill: (newItem.unique_skill || '').trim() || null,
-      attack_speed_bonus: Number(newItem.attack_speed_bonus || 0),
-      hp_bonus: Number(newItem.hp_bonus || 0),
-      attack_bonus: Number(newItem.attack_bonus || 0),
-      defense_bonus: Number(newItem.defense_bonus || 0),
-      accuracy_bonus: Number(newItem.accuracy_bonus || 0),
-    }, { headers })
-    setNewItem({ image_url: '', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
-    await loadAdminPanel()
+    setAdminItemError('')
+    if (!newItem.image_url) {
+      setAdminItemError('Сначала загрузите картинку предмета')
+      return
+    }
+    try {
+      await api.post('/api/master-admin/items', {
+        ...newItem,
+        unique_skill: (newItem.unique_skill || '').trim() || null,
+        attack_speed_bonus: Number(newItem.attack_speed_bonus || 0),
+        hp_bonus: Number(newItem.hp_bonus || 0),
+        attack_bonus: Number(newItem.attack_bonus || 0),
+        defense_bonus: Number(newItem.defense_bonus || 0),
+        accuracy_bonus: Number(newItem.accuracy_bonus || 0),
+      }, { headers })
+      setNewItem({ image_url: '', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
+      await loadAdminPanel()
+    } catch (err) {
+      setAdminItemError(err.response?.data?.detail || 'Не удалось создать предмет')
+    }
   }
 
   const grantItemToUser = async (itemId) => {
@@ -922,8 +933,10 @@ export function App() {
           <section className="card admin-create-item">
             <h3>Создание предмета</h3>
             <div className="admin-item-form">
-              <label>Картинка предмета (URL)</label>
-              <input value={newItem.image_url} placeholder="Картинка (URL)" onChange={(e) => setNewItem((p) => ({ ...p, image_url: e.target.value }))} />
+              <label>Картинка предмета</label>
+              <input ref={adminItemImageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={async (e) => { if (!e.target.files?.[0]) return; const uploaded = await uploadMedia(e.target.files[0]); setNewItem((p) => ({ ...p, image_url: uploaded.url })); e.target.value = '' }} />
+              <button type="button" onClick={() => adminItemImageInputRef.current?.click()}>Загрузить с ПК</button>
+              {newItem.image_url && <img src={`${api.defaults.baseURL}${newItem.image_url}`} alt="item-preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #3a4460' }} />}
               <label>Название предмета</label>
               <input value={newItem.name} placeholder="Название" onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
               <label>Описание предмета</label>
@@ -940,6 +953,7 @@ export function App() {
               <input type="number" step="0.01" value={newItem.attack_speed_bonus} placeholder="Скорость атаки" onChange={(e) => setNewItem((p) => ({ ...p, attack_speed_bonus: e.target.value }))} />
               <label>Уникальное умение (макс. 1 на предмет, пока в разработке)</label>
               <input value={newItem.unique_skill} placeholder="Уникальное умение (макс. 1, в разработке)" onChange={(e) => setNewItem((p) => ({ ...p, unique_skill: e.target.value }))} />
+              {adminItemError && <div className="auth-error">{adminItemError}</div>}
               <button onClick={createAdminItem}>Создать предмет</button>
             </div>
           </section>
