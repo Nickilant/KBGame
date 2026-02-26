@@ -28,6 +28,7 @@ class UserOut(BaseModel):
     defense: int
     level: int
     gold: int
+    avatar_data: str = ""
 
     class Config:
         from_attributes = True
@@ -132,3 +133,7 @@ class PasswordUpdateIn(BaseModel):
 class ChannelIn(BaseModel):
     name: str
     avatar_url: str = ""
+
+
+class AvatarUpdateIn(BaseModel):
+    avatar_data: str

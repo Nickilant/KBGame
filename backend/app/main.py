@@ -33,6 +33,7 @@ from .models import (
 from .raid import boss_auto_attack, get_raid_state, player_attack, start_raid, stop_raid
 from .schemas import (
     AttackOut,
+    AvatarUpdateIn,
     BanIn,
     BossIn,
     ChannelIn,
@@ -66,6 +67,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 def apply_compat_migrations():
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_read_post_id INTEGER"))
+        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT DEFAULT ''"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS audio_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS channel_id INTEGER"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb"))
@@ -269,6 +271,15 @@ def login(payload: LoginIn, db: Session = Depends(get_db)):
 def me(user: User = Depends(get_current_user)):
     return user
 
+
+
+
+@app.patch("/api/me/avatar", response_model=UserOut)
+def update_my_avatar(payload: AvatarUpdateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user.avatar_data = (payload.avatar_data or "")[:2_000_000]
+    db.commit()
+    db.refresh(user)
+    return user
 
 @app.post("/api/raid/start")
 def raid_start(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -562,6 +573,7 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
         "username": user.username,
         "role": user.role,
         "nickname_color": (member.nickname_color if member and member.nickname_color else _pastel_from_seed(msg.room_id, msg.user_id)),
+        "avatar_data": user.avatar_data or "",
         "content": msg.content,
         "media_url": msg.media_url,
         "media_type": msg.media_type,
@@ -579,7 +591,7 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
     if not is_member and not (room.is_main and user.role == "boss"):
         raise HTTPException(403, "You are not a member of this room")
     rows = (
-        db.query(Message, User.username, User.role, RoomMember.nickname_color)
+        db.query(Message, User.username, User.role, RoomMember.nickname_color, User.avatar_data)
         .join(User, User.id == Message.user_id)
         .outerjoin(RoomMember, (RoomMember.room_id == Message.room_id) & (RoomMember.user_id == Message.user_id))
         .filter(Message.room_id == room_id)
@@ -595,13 +607,14 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
             "username": username,
             "role": role,
             "nickname_color": nickname_color or _pastel_from_seed(msg.room_id, msg.user_id),
+            "avatar_data": avatar_data or "",
             "content": msg.content,
             "media_url": msg.media_url,
             "media_type": msg.media_type,
             "media_urls": msg.media_urls or ([msg.media_url] if msg.media_url else []),
             "created_at": msg.created_at,
         }
-        for msg, username, role, nickname_color in rows
+        for msg, username, role, nickname_color, avatar_data in rows
     ]
 
 

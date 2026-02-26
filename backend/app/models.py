@@ -19,6 +19,7 @@ class User(Base):
     level = Column(Integer, default=1)
     gold = Column(Integer, default=0)
     last_read_post_id = Column(Integer, nullable=True)
+    avatar_data = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

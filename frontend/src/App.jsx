@@ -265,6 +265,12 @@ export function App() {
   }, [profileAvatarPixels, defaultAvatarImage])
 
   useEffect(() => {
+    if (!me?.avatar_data) return
+    setProfileAvatarPixels(me.avatar_data)
+    localStorage.setItem('profile_avatar_pixels', me.avatar_data)
+  }, [me?.avatar_data])
+
+  useEffect(() => {
     if (!avatarModalOpen) return
     drawAvatarCanvas(profileAvatarPixels || defaultAvatarImage)
   }, [avatarModalOpen, profileAvatarPixels, defaultAvatarImage])
@@ -564,12 +570,18 @@ export function App() {
     }
   }
 
-  const saveAvatarDrawing = () => {
+  const saveAvatarDrawing = async () => {
     const canvas = avatarCanvasRef.current
     if (!canvas) return
     const snapshot = canvas.toDataURL('image/png')
     setProfileAvatarPixels(snapshot)
     localStorage.setItem('profile_avatar_pixels', snapshot)
+    try {
+      const { data } = await api.patch('/api/me/avatar', { avatar_data: snapshot }, { headers })
+      setMe((prev) => (prev ? { ...prev, avatar_data: data.avatar_data || snapshot } : prev))
+    } catch {
+      // noop
+    }
     setAvatarModalOpen(false)
   }
 
@@ -798,7 +810,7 @@ export function App() {
             <section className="posts-scroll-block chat-box no-radius">
               {chat.map((m, i) => {
                 const mediaItems = (m.media_urls?.length ? m.media_urls : (m.media_url ? [m.media_url] : []))
-                return <div key={m.id || i} className="chat-message">{m.user_id === me?.id ? <img src={profileAvatarPixels || defaultAvatarImage} alt="avatar" className="chat-user-avatar-image" /> : <span className="chat-user-avatar" style={{ backgroundColor: m.nickname_color || '#50608a' }}>{chatAvatarLetter(m.username || `#${m.user_id}`)}</span>}<b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {mediaItems.map((url) => <img key={url} className="chat-inline-image" src={`${api.defaults.baseURL}${url}`} alt="chat-media" />)} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>
+                return <div key={m.id || i} className="chat-message">{m.avatar_data ? <img src={m.avatar_data} alt="avatar" className="chat-user-avatar-image" /> : <span className="chat-user-avatar" style={{ backgroundColor: m.nickname_color || '#50608a' }}>{chatAvatarLetter(m.username || `#${m.user_id}`)}</span>}<b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {mediaItems.map((url) => <img key={url} className="chat-inline-image" src={`${api.defaults.baseURL}${url}`} alt="chat-media" />)} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>
               })}
             </section>
             <div className="chat-input-wrap">
