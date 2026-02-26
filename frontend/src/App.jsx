@@ -689,11 +689,15 @@ export function App() {
       alert('Выберите пользователя-игрока для выдачи предмета')
       return
     }
-    await api.post(`/api/master-admin/items/${itemId}/grant`, {
-      user_id: Number(selectedGrantUserId),
-      quantity: Math.max(1, Number(grantQuantity || 1)),
-    }, { headers })
-    await loadAdminPanel()
+    try {
+      await api.post(`/api/master-admin/items/${itemId}/grant`, {
+        user_id: Number(selectedGrantUserId),
+        quantity: Math.max(1, Number(grantQuantity || 1)),
+      }, { headers })
+      await loadAdminPanel()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось выдать предмет')
+    }
   }
 
   const updateAdminUserDraft = (userId, field, value) => {

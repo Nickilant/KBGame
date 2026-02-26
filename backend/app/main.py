@@ -89,6 +89,16 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS attack_speed_bonus DOUBLE PRECISION DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS unique_skill VARCHAR(255)"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS slot VARCHAR(32) DEFAULT 'weapon'"))
+        connection.execute(text("ALTER TABLE inventories ADD COLUMN IF NOT EXISTS equipped BOOLEAN DEFAULT FALSE"))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS inventories (
+                id SERIAL PRIMARY KEY,
+                player_id INTEGER REFERENCES users(id),
+                item_id INTEGER REFERENCES items(id),
+                equipped BOOLEAN DEFAULT FALSE
+            )
+        """))
 
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS room_members (
