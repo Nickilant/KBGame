@@ -646,31 +646,25 @@ export function App() {
     drawAvatarCanvas(defaultAvatarImage)
   }
 
-  const equipItem = (item) => {
-    const normalized = {
-      ...normalizeInventoryItem(item),
-      equipped: true,
+  const equipItem = async (item) => {
+    if (!item?.inventory_entry_id) return
+    try {
+      await api.post(`/api/inventory/${item.inventory_entry_id}/equip`, {}, { headers })
+      await loadInventory()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось экипировать предмет')
     }
-    const targetSlot = item.slot === 'ring'
-      ? (!equippedItems.ring1 ? 'ring1' : (!equippedItems.ring2 ? 'ring2' : 'ring1'))
-      : (item.slot || 'weapon')
-
-    setEquippedItems((prev) => {
-      const previousInSlot = prev[targetSlot]
-      const nextEquipped = { ...prev, [targetSlot]: normalized }
-      if (previousInSlot) {
-        setInventory((invPrev) => [...invPrev, { ...previousInSlot, equipped: false }])
-      }
-      return nextEquipped
-    })
-    setInventory((prev) => prev.filter((invItem) => invItem.inventory_entry_id !== item.inventory_entry_id))
   }
 
-  const unequipItem = (slotKey) => {
+  const unequipItem = async (slotKey) => {
     const item = equippedItems[slotKey]
-    if (!item) return
-    setInventory((prev) => [...prev, { ...item, equipped: false }])
-    setEquippedItems((prev) => ({ ...prev, [slotKey]: null }))
+    if (!item?.inventory_entry_id) return
+    try {
+      await api.post(`/api/inventory/${item.inventory_entry_id}/unequip`, {}, { headers })
+      await loadInventory()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось снять предмет')
+    }
   }
 
   const loadAdminPanel = async () => {

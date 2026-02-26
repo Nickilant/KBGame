@@ -1106,6 +1106,53 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
     ]
 
 
+
+
+@app.post("/api/inventory/{entry_id}/equip")
+def equip_inventory_item(entry_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    inv = db.query(Inventory).filter(Inventory.id == entry_id, Inventory.player_id == user.id).first()
+    if not inv:
+        raise HTTPException(404, "Inventory entry not found")
+
+    item = db.query(Item).filter(Item.id == inv.item_id).first()
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    slot = (item.slot or "weapon").lower()
+    if slot == "ring":
+        ring_item_ids = [row[0] for row in db.query(Item.id).filter(Item.slot == "ring").all()]
+        equipped_ring_count = db.query(Inventory).filter(
+            Inventory.player_id == user.id,
+            Inventory.equipped.is_(True),
+            Inventory.item_id.in_(ring_item_ids),
+            Inventory.id != inv.id,
+        ).count() if ring_item_ids else 0
+        if equipped_ring_count >= 2:
+            raise HTTPException(400, "No free ring slot")
+    else:
+        slot_item_ids = [row[0] for row in db.query(Item.id).filter(Item.slot == slot).all()]
+        if slot_item_ids:
+            db.query(Inventory).filter(
+                Inventory.player_id == user.id,
+                Inventory.equipped.is_(True),
+                Inventory.item_id.in_(slot_item_ids),
+                Inventory.id != inv.id,
+            ).update({Inventory.equipped: False}, synchronize_session=False)
+
+    inv.equipped = True
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/inventory/{entry_id}/unequip")
+def unequip_inventory_item(entry_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    inv = db.query(Inventory).filter(Inventory.id == entry_id, Inventory.player_id == user.id).first()
+    if not inv:
+        raise HTTPException(404, "Inventory entry not found")
+    inv.equipped = False
+    db.commit()
+    return {"ok": True}
+
 @app.websocket("/ws/{room}")
 async def websocket_room(ws: WebSocket, room: str):
     await ws_manager.connect(room, ws)
