@@ -207,9 +207,11 @@ export function App() {
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
     setChannels(data)
-    if (data.length && !data.some((c) => c.id === selectedChannelId)) {
-      setSelectedChannelId(data[0].id)
-    }
+    setSelectedChannelId((prev) => {
+      if (!data.length) return null
+      if (prev && data.some((c) => c.id === prev)) return prev
+      return prev == null ? data[0].id : prev
+    })
   }
 
   const loadFeed = async (scrollToLastRead = false) => {
@@ -231,7 +233,7 @@ export function App() {
     setSelectedRoomId((prev) => {
       if (!roomData.length) return null
       if (prev && roomData.some((r) => r.id === prev)) return prev
-      return (roomData.find((r) => r.name === 'global') || roomData[0]).id
+      return prev == null ? ((roomData.find((r) => r.name === 'global') || roomData[0]).id) : prev
     })
   }
 
@@ -469,6 +471,8 @@ export function App() {
     await api.post(`/api/news/${commentModalPost.id}/comments`, { content: commentDraft }, { headers })
     const { data } = await api.get(`/api/news/${commentModalPost.id}/comments`, { headers })
     setComments(data)
+    setPosts((prev) => prev.map((post) => (post.id === commentModalPost.id ? { ...post, comment_count: data.length } : post)))
+    await loadChannels()
     setCommentDraft('')
   }
 
@@ -729,11 +733,11 @@ export function App() {
                   <article id={`post-${p.id}`} className="tg-post card" onClick={() => markRead(p.id)}>
                     {postImages.length > 0 && <div className="post-media-grid">{postImages.map((url, idx) => <button type="button" key={`${url}-${idx}`} className="post-media-button" onClick={(e) => { e.stopPropagation(); openImageViewer(postImages, idx) }}><img className="post-image" src={`${api.defaults.baseURL}${url}`} alt="media" /></button>)}</div>}
                     {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
+                    {isBoss && <button className="delete-post-btn" onClick={(e) => { e.stopPropagation(); deletePost(p.id) }} aria-label="Удалить пост">✕</button>}
                     <div className="post-body">
                       <p className="post-text">{p.content}</p>
                       <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
                       <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}><span>{p.comment_count > 0 ? `Комментариев ${p.comment_count}` : 'Прокомментировать'}</span><span className="row-arrow">›</span></button>
-                      {isBoss && <button className="delete-post-btn" onClick={(e) => { e.stopPropagation(); deletePost(p.id) }}>Удалить пост</button>}
                     </div>
                   </article>
 

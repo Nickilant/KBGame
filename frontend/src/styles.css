@@ -24,7 +24,7 @@
 .post-body{padding:10px 12px}
 .post-text{margin-top:8px}
 .post-meta{color:#b7c1db;font-size:13px;margin:6px 0;display:flex;justify-content:flex-end}.views-right{text-align:right}
-.delete-post-btn{margin-top:8px;background:#582a37;border-color:#6f3548}
+.delete-post-btn{position:absolute;top:8px;right:8px;width:26px;height:26px;padding:0;border-radius:50%;background:#d13a4d;border:0;color:#fff;font-size:16px;line-height:26px;display:grid;place-items:center;z-index:2}
 .reactions-summary{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.reactions-summary.under-post{margin:6px 0 2px 0}.reaction-capsule{border-radius:999px;padding:4px 10px;background:#2f3850;border:1px solid #4a5577}.reaction-capsule.mine{background:#4a5a85}
 
 .hover-reactions-vertical{position:absolute;right:6px;top:12px;height:186px;width:44px;background:#0f1422;border:1px solid #3a4460;border-radius:16px;padding:6px;display:flex;flex-direction:column;gap:6px;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;overscroll-behavior:contain}.hover-reactions-vertical::-webkit-scrollbar{display:none}.hover-reactions-vertical button{height:30px;min-height:30px;padding:0}
