@@ -91,6 +91,9 @@ export function App() {
   const [adminItems, setAdminItems] = useState([])
   const [adminUserDrafts, setAdminUserDrafts] = useState({})
   const [newBoss, setNewBoss] = useState({ name: '', hp: 1000, attack: 40, defense: 15 })
+  const [raidState, setRaidState] = useState({ active: false })
+  const [raidPosition, setRaidPosition] = useState('attack')
+  const [raidAction, setRaidAction] = useState('attack')
   const [selectedGrantUserId, setSelectedGrantUserId] = useState('')
   const [grantQuantity, setGrantQuantity] = useState(1)
   const adminItemImageInputRef = useRef(null)
@@ -667,6 +670,43 @@ export function App() {
     }
   }
 
+  const loadRaidState = async () => {
+    try {
+      const { data } = await api.get('/api/raid/state', { headers })
+      setRaidState(data || { active: false })
+    } catch {
+      setRaidState({ active: false })
+    }
+  }
+
+  const startRaid = async () => {
+    try {
+      await api.post('/api/raid/start', {}, { headers })
+      await loadRaidState()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось начать рейд')
+    }
+  }
+
+  const joinRaid = async () => {
+    try {
+      const { data } = await api.post(`/api/raid/join?position=${raidPosition}`, {}, { headers })
+      setRaidState(data)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось записаться в рейд')
+    }
+  }
+
+  const sendRaidAction = async (action) => {
+    try {
+      const { data } = await api.post(`/api/raid/action?action=${action}`, {}, { headers })
+      setRaidState(data)
+      setRaidAction(action)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось отправить действие')
+    }
+  }
+
   const loadAdminPanel = async () => {
     const [usersResult, itemsResult] = await Promise.allSettled([
       api.get('/api/master-admin/users', { headers }),
@@ -810,6 +850,13 @@ export function App() {
       clearInterval(inventoryPoll)
       window.removeEventListener('focus', refreshInventory)
     }
+  }, [token, activeTab])
+
+  useEffect(() => {
+    if (!token || activeTab !== 'boss') return
+    loadRaidState()
+    const timer = setInterval(loadRaidState, 2000)
+    return () => clearInterval(timer)
   }, [token, activeTab])
 
 
@@ -1102,7 +1149,69 @@ export function App() {
         </main>
       )}
 
-            {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
+            {activeTab === 'boss' && (
+              <main className="boss-page card">
+                <section className="boss-battlefield">
+                  <div className="boss-sky" />
+                  <div className="boss-ground" />
+                  <div className="boss-entity">👹 {raidState.active ? (raidState.boss_name || 'Босс') : 'Поле сражения'}</div>
+                </section>
+
+                <aside className="boss-side">
+                  <div className="card">
+                    <h3>Ваш профиль</h3>
+                    <p><b>{me?.username}</b> · HP: {me?.hp}</p>
+                    {!raidState.active && <p>Рейд неактивен. Ожидаем появления босса.</p>}
+                    {!raidState.active && isBoss && <button onClick={startRaid}>Запустить рейд</button>}
+                  </div>
+
+                  {raidState.active && (
+                    <div className="card">
+                      <h3>Состояние рейда</h3>
+                      <p>Фаза: {raidState.phase === 'signup' ? 'Набор (2 мин)' : (raidState.phase === 'players' ? 'Ход игроков' : 'Ход босса')}</p>
+                      <p>ХП босса: {raidState.boss_hp} / {raidState.boss_max_hp || raidState.boss_hp}</p>
+                      <p>Ход: {raidState.turn || 0}</p>
+                      <small>{raidState.last_log || ''}</small>
+                    </div>
+                  )}
+
+                  {raidState.active && raidState.phase === 'signup' && (
+                    <div className="card">
+                      <h3>Запись в рейд</h3>
+                      <select value={raidPosition} onChange={(e) => setRaidPosition(e.target.value)}>
+                        <option value="defense">Оборона</option>
+                        <option value="attack">Атака</option>
+                        <option value="support">Поддержка</option>
+                      </select>
+                      <button onClick={joinRaid}>Записаться</button>
+                    </div>
+                  )}
+
+                  {raidState.active && raidState.phase === 'players' && (
+                    <div className="card">
+                      <h3>Действие на ход</h3>
+                      <div className="boss-actions">
+                        <button className={raidAction === 'attack' ? 'active' : ''} onClick={() => sendRaidAction('attack')}>Атака</button>
+                        <button className={raidAction === 'defend' ? 'active' : ''} onClick={() => sendRaidAction('defend')}>Оборона</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {raidState.active && (
+                    <div className="card">
+                      <h3>Позиции</h3>
+                      <div className="boss-position-stats">
+                        {['defense','attack','support'].map((pos) => {
+                          const members = Object.values(raidState.participants || {}).filter((p) => p.position === pos && p.alive)
+                          const hpSum = members.reduce((acc, p) => acc + (p.hp || 0), 0)
+                          return <div key={pos}><b>{pos}</b><span>{members.length} чел · {hpSum} HP</span></div>
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </aside>
+              </main>
+            )}
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
       {showRoomModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый чат</h3><input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Название чата" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewRoomAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowRoomModal(false)}>Отмена</button><button onClick={createRoom}>Создать</button></div></div></div>}

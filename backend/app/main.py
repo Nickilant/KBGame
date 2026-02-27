@@ -30,7 +30,7 @@ from .models import (
     RoomUserState,
     User,
 )
-from .raid import boss_auto_attack, get_raid_state, player_attack, start_raid, stop_raid
+from .raid import boss_auto_attack, get_raid_state, join_raid, player_attack, progress_raid_turn, start_raid, stop_raid, submit_action
 from .schemas import (
     AttackOut,
     AvatarUpdateIn,
@@ -314,8 +314,28 @@ def raid_stop(user: User = Depends(require_roles("master_admin", "admin", "boss"
 
 
 @app.get("/api/raid/state")
-def raid_state():
-    return get_raid_state() or {"active": False}
+def raid_state(db: Session = Depends(get_db)):
+    try:
+        return progress_raid_turn(db)
+    except ValueError:
+        return get_raid_state() or {"active": False}
+
+
+@app.post("/api/raid/join")
+def raid_join(position: str = Query(...), user: User = Depends(require_roles("player", "master_admin", "admin")), db: Session = Depends(get_db)):
+    try:
+        return join_raid(db, user, position)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/raid/action")
+def raid_action(action: str = Query(...), user: User = Depends(require_roles("player", "master_admin", "admin")), db: Session = Depends(get_db)):
+    try:
+        submit_action(user, action)
+        return progress_raid_turn(db)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/raid/attack", response_model=AttackOut)

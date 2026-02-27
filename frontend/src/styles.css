@@ -184,3 +184,17 @@
 .post-context-menu{position:fixed;z-index:80;min-width:160px;background:#1b2236;border:1px solid #45537b;border-radius:10px;padding:6px;box-shadow:0 12px 24px rgba(0,0,0,.35)}
 .post-context-delete{width:100%;text-align:left;background:transparent;border:0;padding:8px 10px;border-radius:8px;color:#ffd5db;font-weight:600}
 .post-context-delete:hover{background:#5c2935}
+
+
+.boss-page{display:grid;grid-template-columns:1.3fr .9fr;gap:10px;min-height:520px}
+.boss-battlefield{position:relative;overflow:hidden;border:1px solid #2f3c62;border-radius:12px;background:#0f1526;min-height:520px}
+.boss-sky{position:absolute;inset:0 0 45% 0;background:linear-gradient(180deg,#243a6a 0%,#17253f 100%)}
+.boss-ground{position:absolute;inset:55% 0 0 0;background:linear-gradient(180deg,#2b3b2b 0%,#1b2619 100%);transform:perspective(700px) rotateX(58deg);transform-origin:top center}
+.boss-entity{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);font-size:32px;text-shadow:0 0 20px rgba(0,0,0,.6)}
+.boss-side{display:grid;gap:10px;align-content:start}
+.boss-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.boss-actions .active{background:#2f5fe6;border-color:#5178ee}
+.boss-position-stats{display:grid;gap:6px}
+.boss-position-stats > div{display:flex;justify-content:space-between;padding:8px;border:1px solid #344160;border-radius:8px;background:#101a2f}
+.boss-position-stats span{color:#b8c7ef;font-size:12px}
+@media (max-width:960px){.boss-page{grid-template-columns:1fr}.boss-battlefield{min-height:280px}}
