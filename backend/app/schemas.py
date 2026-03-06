@@ -28,6 +28,7 @@ class UserOut(BaseModel):
     defense: int
     level: int
     gold: int
+    avatar_data: str = ""
 
     class Config:
         from_attributes = True
@@ -51,6 +52,7 @@ class MessageIn(BaseModel):
     content: str = ""
     media_url: str = ""
     media_type: str = ""
+    media_urls: list[str] = []
 
 
 class PostIn(BaseModel):
@@ -59,6 +61,7 @@ class PostIn(BaseModel):
     image_url: str = ""
     video_url: str = ""
     audio_url: str = ""
+    media_urls: list[str] = []
     channel_id: int | None = None
 
 
@@ -109,6 +112,7 @@ class LootUpdateIn(BaseModel):
 
 class ItemCreateIn(BaseModel):
     image_url: str
+    slot: str = "weapon"
     name: str
     description: str
     hp_bonus: int = 0
@@ -130,3 +134,7 @@ class PasswordUpdateIn(BaseModel):
 class ChannelIn(BaseModel):
     name: str
     avatar_url: str = ""
+
+
+class AvatarUpdateIn(BaseModel):
+    avatar_data: str

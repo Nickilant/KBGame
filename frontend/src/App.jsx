@@ -4,7 +4,8 @@ import axios from 'axios'
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000' })
 const ALL_REACTIONS = ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😍','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤗','🤔','🤨','😐','😑','😶','🙄','😏','😣','😥','😮','🤐','😯','😪','😫','🥱','😴','😌']
 const AVATAR_SIZE = 64
-const AVATAR_RADIUS = 31
+const AVATAR_RADIUS = 32
+const toApiMediaUrl = (url) => (url && /^https?:\/\//i.test(url) ? url : `${api.defaults.baseURL}${url || ''}`)
 
 const createDefaultAvatar = () => {
   const canvas = document.createElement('canvas')
@@ -32,9 +33,10 @@ export function App() {
   const [channels, setChannels] = useState([])
   const [selectedChannelId, setSelectedChannelId] = useState(null)
   const [newPostText, setNewPostText] = useState('')
-  const [postMedia, setPostMedia] = useState(null)
+  const [postMedia, setPostMedia] = useState([])
   const [uploading, setUploading] = useState(false)
   const [hoveredPostId, setHoveredPostId] = useState(null)
+  const [postContextMenu, setPostContextMenu] = useState({ open: false, x: 0, y: 0, postId: null })
   const [showChannelModal, setShowChannelModal] = useState(false)
   const [newChannelName, setNewChannelName] = useState('')
   const [newChannelAvatar, setNewChannelAvatar] = useState('')
@@ -44,7 +46,7 @@ export function App() {
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [chat, setChat] = useState([])
   const [message, setMessage] = useState('')
-  const [chatMedia, setChatMedia] = useState(null)
+  const [chatMedia, setChatMedia] = useState([])
   const [chatError, setChatError] = useState('')
   const [slowmodeNotice, setSlowmodeNotice] = useState('')
   const wsRef = useRef(null)
@@ -56,6 +58,9 @@ export function App() {
   const [newRoomAvatar, setNewRoomAvatar] = useState('')
   const [joinCodeInput, setJoinCodeInput] = useState('')
   const [roomMembers, setRoomMembers] = useState([])
+  const [roomNameDraft, setRoomNameDraft] = useState('')
+  const chatSettingsAvatarInputRef = useRef(null)
+  const [imageViewer, setImageViewer] = useState({ open: false, images: [], index: 0 })
 
   const [commentModalPost, setCommentModalPost] = useState(null)
   const [comments, setComments] = useState([])
@@ -80,15 +85,22 @@ export function App() {
     ring2: null,
   })
   const [inventory, setInventory] = useState([])
+  const [inventoryModalItem, setInventoryModalItem] = useState(null)
   const [uniqueAbilities] = useState(Array(10).fill(null))
   const [adminUsers, setAdminUsers] = useState([])
   const [adminItems, setAdminItems] = useState([])
   const [adminUserDrafts, setAdminUserDrafts] = useState({})
   const [newBoss, setNewBoss] = useState({ name: '', hp: 1000, attack: 40, defense: 15 })
+  const [raidState, setRaidState] = useState({ active: false })
+  const [raidPosition, setRaidPosition] = useState('attack')
+  const [raidAction, setRaidAction] = useState('attack')
   const [selectedGrantUserId, setSelectedGrantUserId] = useState('')
   const [grantQuantity, setGrantQuantity] = useState(1)
+  const adminItemImageInputRef = useRef(null)
+  const [adminItemError, setAdminItemError] = useState('')
   const [newItem, setNewItem] = useState({
     image_url: '',
+    slot: 'weapon',
     name: '',
     description: '',
     hp_bonus: 0,
@@ -123,6 +135,31 @@ export function App() {
   }
 
   const defaultAvatarImage = useMemo(() => createDefaultAvatar(), [])
+  const addMediaAttachment = async (files, setter) => {
+    const uploaded = await Promise.all(Array.from(files).map((file) => uploadMedia(file)))
+    setter((prev) => [...prev, ...uploaded.filter((item) => item?.type === 'image')])
+  }
+
+  const removeMediaAttachment = (index, setter) => {
+    setter((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  const chatAvatarLetter = (name) => (name || '?').trim().slice(0, 1).toUpperCase()
+
+  const openImageViewer = (images, startIndex = 0) => {
+    if (!images?.length) return
+    setImageViewer({ open: true, images, index: Math.max(0, Math.min(startIndex, images.length - 1)) })
+  }
+
+  const closeImageViewer = () => setImageViewer({ open: false, images: [], index: 0 })
+
+  const switchViewerImage = (direction) => {
+    setImageViewer((prev) => {
+      if (!prev.open || prev.images.length < 2) return prev
+      const next = (prev.index + direction + prev.images.length) % prev.images.length
+      return { ...prev, index: next }
+    })
+  }
 
   const drawAvatarCanvas = (source) => {
     const canvas = avatarCanvasRef.current
@@ -141,7 +178,7 @@ export function App() {
   const isInsideAvatarBall = (x, y) => {
     const dx = x - (AVATAR_SIZE / 2)
     const dy = y - (AVATAR_SIZE / 2)
-    return (dx * dx) + (dy * dy) <= (AVATAR_RADIUS * AVATAR_RADIUS)
+    return (dx * dx) + (dy * dy) <= ((AVATAR_RADIUS + 0.75) * (AVATAR_RADIUS + 0.75))
   }
 
   const paintAvatarAt = (event) => {
@@ -156,7 +193,8 @@ export function App() {
     if (!ctx) return
 
     if (avatarTool === 'eraser') {
-      ctx.clearRect(x, y, 1, 1)
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(x, y, 1, 1)
       return
     }
 
@@ -175,12 +213,36 @@ export function App() {
     { key: 'ring2', label: 'Кольцо II', accepted: 'ring' },
   ]
 
+
+  const createEmptyEquipmentState = () => ({
+    weapon: null,
+    shield: null,
+    helmet: null,
+    armor: null,
+    boots: null,
+    amulet: null,
+    ring1: null,
+    ring2: null,
+  })
+
+  const normalizeInventoryItem = (item) => ({
+    ...item,
+    bonuses: {
+      hp: item.hp_bonus || item.bonuses?.hp || 0,
+      damage: item.attack_bonus || item.bonuses?.damage || 0,
+      defense: item.defense_bonus || item.bonuses?.defense || 0,
+      accuracy: item.accuracy_bonus || item.bonuses?.accuracy || 0,
+      speed: item.attack_speed_bonus || item.bonuses?.speed || 0,
+    },
+  })
   const loadChannels = async () => {
     const { data } = await api.get('/api/channels', { headers })
     setChannels(data)
-    if (data.length && !data.some((c) => c.id === selectedChannelId)) {
-      setSelectedChannelId(data[0].id)
-    }
+    setSelectedChannelId((prev) => {
+      if (!data.length) return null
+      if (prev && data.some((c) => c.id === prev)) return prev
+      return prev == null ? data[0].id : prev
+    })
   }
 
   const loadFeed = async (scrollToLastRead = false) => {
@@ -202,15 +264,47 @@ export function App() {
     setSelectedRoomId((prev) => {
       if (!roomData.length) return null
       if (prev && roomData.some((r) => r.id === prev)) return prev
-      return (roomData.find((r) => r.name === 'global') || roomData[0]).id
+      return prev == null ? ((roomData.find((r) => r.name === 'global') || roomData[0]).id) : prev
     })
+  }
+
+  const loadInventory = async () => {
+    const inventoryResp = await api.get('/api/inventory', { headers })
+    const rows = Array.isArray(inventoryResp.data) ? inventoryResp.data : []
+
+    const nextEquipped = createEmptyEquipmentState()
+    const nextInventory = []
+
+    rows.forEach((rawItem) => {
+      const normalized = normalizeInventoryItem(rawItem)
+      if (!rawItem.equipped) {
+        nextInventory.push(normalized)
+        return
+      }
+
+      const slot = rawItem.slot || 'weapon'
+      if (slot === 'ring') {
+        if (!nextEquipped.ring1) nextEquipped.ring1 = normalized
+        else if (!nextEquipped.ring2) nextEquipped.ring2 = normalized
+        else nextInventory.push({ ...normalized, equipped: false })
+        return
+      }
+
+      if (Object.prototype.hasOwnProperty.call(nextEquipped, slot) && !nextEquipped[slot]) {
+        nextEquipped[slot] = normalized
+      } else {
+        nextInventory.push({ ...normalized, equipped: false })
+      }
+    })
+
+    setEquippedItems(nextEquipped)
+    setInventory(nextInventory)
   }
 
   const loadBase = async () => {
     const meResp = await api.get('/api/me', { headers })
     setMe(meResp.data)
-    const inventoryResp = await api.get('/api/inventory', { headers })
-    setInventory(inventoryResp.data)
+    await loadInventory()
     await loadChannels()
     await loadRooms()
   }
@@ -227,6 +321,12 @@ export function App() {
     setProfileAvatarPixels(defaultAvatarImage)
     localStorage.setItem('profile_avatar_pixels', defaultAvatarImage)
   }, [profileAvatarPixels, defaultAvatarImage])
+
+  useEffect(() => {
+    if (!me?.avatar_data) return
+    setProfileAvatarPixels(me.avatar_data)
+    localStorage.setItem('profile_avatar_pixels', me.avatar_data)
+  }, [me?.avatar_data])
 
   useEffect(() => {
     if (!avatarModalOpen) return
@@ -252,6 +352,32 @@ export function App() {
     if (!token || !selectedRoomId) return
     api.get(`/api/rooms/${selectedRoomId}/members`, { headers }).then((r) => setRoomMembers(r.data)).catch(() => setRoomMembers([]))
   }, [token, selectedRoomId, headers])
+
+  useEffect(() => {
+    setRoomNameDraft(selectedRoom?.name || '')
+  }, [selectedRoom?.id, selectedRoom?.name])
+
+
+  useEffect(() => {
+    if (!postContextMenu.open) return
+    const close = () => setPostContextMenu({ open: false, x: 0, y: 0, postId: null })
+    window.addEventListener('click', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [postContextMenu.open])
+  useEffect(() => {
+    if (!imageViewer.open) return
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') closeImageViewer()
+      if (event.key === 'ArrowLeft') switchViewerImage(-1)
+      if (event.key === 'ArrowRight') switchViewerImage(1)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [imageViewer.open])
 
   useEffect(() => {
     if (!token || !selectedRoomId) return
@@ -359,18 +485,19 @@ export function App() {
 
   const createPost = async (e) => {
     e.preventDefault()
-    if (!newPostText.trim() && !postMedia) return
+    if (!newPostText.trim() && postMedia.length === 0) return
     await api.post('/api/news', {
       title: newPostText.slice(0, 60) || 'Новый пост',
       content: newPostText || ' ',
-      image_url: postMedia?.type === 'image' ? postMedia.url : '',
-      video_url: postMedia?.type === 'video' ? postMedia.url : '',
+      image_url: postMedia[0]?.type === 'image' ? postMedia[0].url : '',
+      video_url: postMedia[0]?.type === 'video' ? postMedia[0].url : '',
+      media_urls: postMedia.filter((m) => m.type === 'image').map((m) => m.url),
       audio_url: '',
       channel_id: selectedChannelId,
     }, { headers })
     if (syncWsRef.current?.readyState === WebSocket.OPEN) syncWsRef.current.send(JSON.stringify({ type: 'posts_changed' }))
     setNewPostText('')
-    setPostMedia(null)
+    setPostMedia([])
     await Promise.all([loadFeed(false), loadChannels()])
   }
 
@@ -424,20 +551,28 @@ export function App() {
     await api.post(`/api/news/${commentModalPost.id}/comments`, { content: commentDraft }, { headers })
     const { data } = await api.get(`/api/news/${commentModalPost.id}/comments`, { headers })
     setComments(data)
+    setPosts((prev) => prev.map((post) => (post.id === commentModalPost.id ? { ...post, comment_count: data.length } : post)))
+    await loadChannels()
     setCommentDraft('')
   }
 
   const sendMessage = async () => {
-    if (!selectedRoomId || (!message.trim() && !chatMedia)) return
+    if (!selectedRoomId || (!message.trim() && chatMedia.length === 0)) return
     setChatError('')
     try {
-      const { data } = await api.post('/api/chat/messages', { room_id: selectedRoomId, content: message, media_url: chatMedia?.url || '', media_type: chatMedia?.type || '' }, { headers })
+      const { data } = await api.post('/api/chat/messages', {
+        room_id: selectedRoomId,
+        content: message,
+        media_url: chatMedia[0]?.url || '',
+        media_type: chatMedia.length ? 'image' : '',
+        media_urls: chatMedia.map((m) => m.url),
+      }, { headers })
       setChat((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data]))
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'message_created', room_id: selectedRoomId, message: data }))
       }
       setMessage('')
-      setChatMedia(null)
+      setChatMedia([])
       setSlowmodeNotice('')
     } catch (err) {
       const detail = err.response?.data?.detail
@@ -493,12 +628,18 @@ export function App() {
     }
   }
 
-  const saveAvatarDrawing = () => {
+  const saveAvatarDrawing = async () => {
     const canvas = avatarCanvasRef.current
     if (!canvas) return
     const snapshot = canvas.toDataURL('image/png')
     setProfileAvatarPixels(snapshot)
     localStorage.setItem('profile_avatar_pixels', snapshot)
+    try {
+      const { data } = await api.patch('/api/me/avatar', { avatar_data: snapshot }, { headers })
+      setMe((prev) => (prev ? { ...prev, avatar_data: data.avatar_data || snapshot } : prev))
+    } catch {
+      // noop
+    }
     setAvatarModalOpen(false)
   }
 
@@ -508,49 +649,78 @@ export function App() {
     drawAvatarCanvas(defaultAvatarImage)
   }
 
-  const equipItem = (item) => {
-    const normalized = {
-      ...item,
-      bonuses: {
-        hp: item.hp_bonus || item.bonuses?.hp || 0,
-        damage: item.attack_bonus || item.bonuses?.damage || 0,
-        defense: item.defense_bonus || item.bonuses?.defense || 0,
-        accuracy: item.accuracy_bonus || item.bonuses?.accuracy || 0,
-        speed: item.attack_speed_bonus || item.bonuses?.speed || 0,
-      },
+  const equipItem = async (item) => {
+    if (!item?.inventory_entry_id) return
+    try {
+      await api.post(`/api/inventory/${item.inventory_entry_id}/equip`, {}, { headers })
+      await loadInventory()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось экипировать предмет')
     }
-    const targetSlot = item.slot === 'ring'
-      ? (!equippedItems.ring1 ? 'ring1' : (!equippedItems.ring2 ? 'ring2' : 'ring1'))
-      : (item.slot || 'weapon')
-
-    setEquippedItems((prev) => {
-      const previousInSlot = prev[targetSlot]
-      const nextEquipped = { ...prev, [targetSlot]: normalized }
-      if (previousInSlot) {
-        setInventory((invPrev) => [...invPrev, previousInSlot])
-      }
-      return nextEquipped
-    })
-    setInventory((prev) => prev.filter((invItem, idx) => (invItem.id !== item.id) || idx !== prev.findIndex((x) => x.id === item.id)))
   }
 
-  const unequipItem = (slotKey) => {
+  const unequipItem = async (slotKey) => {
     const item = equippedItems[slotKey]
-    if (!item) return
-    setInventory((prev) => [...prev, item])
-    setEquippedItems((prev) => ({ ...prev, [slotKey]: null }))
+    if (!item?.inventory_entry_id) return
+    try {
+      await api.post(`/api/inventory/${item.inventory_entry_id}/unequip`, {}, { headers })
+      await loadInventory()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось снять предмет')
+    }
+  }
+
+  const loadRaidState = async () => {
+    try {
+      const { data } = await api.get('/api/raid/state', { headers })
+      setRaidState(data || { active: false })
+    } catch {
+      setRaidState({ active: false })
+    }
+  }
+
+  const startRaid = async () => {
+    try {
+      await api.post('/api/raid/start', {}, { headers })
+      await loadRaidState()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось начать рейд')
+    }
+  }
+
+  const joinRaid = async () => {
+    try {
+      const { data } = await api.post(`/api/raid/join?position=${raidPosition}`, {}, { headers })
+      setRaidState(data)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось записаться в рейд')
+    }
+  }
+
+  const sendRaidAction = async (action) => {
+    try {
+      const { data } = await api.post(`/api/raid/action?action=${action}`, {}, { headers })
+      setRaidState(data)
+      setRaidAction(action)
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось отправить действие')
+    }
   }
 
   const loadAdminPanel = async () => {
-    const [usersResp, itemsResp] = await Promise.all([
+    const [usersResult, itemsResult] = await Promise.allSettled([
       api.get('/api/master-admin/users', { headers }),
       api.get('/api/master-admin/items', { headers }),
     ])
-    setAdminUsers(usersResp.data)
-    setAdminItems(itemsResp.data)
+
+    const usersData = usersResult.status === 'fulfilled' ? usersResult.value.data : []
+    const itemsData = itemsResult.status === 'fulfilled' ? itemsResult.value.data : []
+
+    setAdminUsers(usersData)
+    setAdminItems(itemsData)
     setAdminUserDrafts((prev) => {
       const next = { ...prev }
-      usersResp.data.forEach((u) => {
+      usersData.forEach((u) => {
         next[u.id] = {
           role: prev[u.id]?.role ?? u.role,
           hp: prev[u.id]?.hp ?? u.hp,
@@ -562,32 +732,51 @@ export function App() {
       })
       return next
     })
-    if (!selectedGrantUserId && usersResp.data.length) {
-      setSelectedGrantUserId(String(usersResp.data[0].id))
-    }
+    const playerUsers = usersData.filter((u) => u.role === 'player')
+    setSelectedGrantUserId((prev) => {
+      if (!playerUsers.length) return ''
+      if (prev && playerUsers.some((u) => String(u.id) === String(prev))) return prev
+      return String(playerUsers[0].id)
+    })
   }
 
   const createAdminItem = async () => {
-    await api.post('/api/master-admin/items', {
-      ...newItem,
-      unique_skill: (newItem.unique_skill || '').trim() || null,
-      attack_speed_bonus: Number(newItem.attack_speed_bonus || 0),
-      hp_bonus: Number(newItem.hp_bonus || 0),
-      attack_bonus: Number(newItem.attack_bonus || 0),
-      defense_bonus: Number(newItem.defense_bonus || 0),
-      accuracy_bonus: Number(newItem.accuracy_bonus || 0),
-    }, { headers })
-    setNewItem({ image_url: '', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
-    await loadAdminPanel()
+    setAdminItemError('')
+    if (!newItem.image_url) {
+      setAdminItemError('Сначала загрузите картинку предмета')
+      return
+    }
+    try {
+      await api.post('/api/master-admin/items', {
+        ...newItem,
+        unique_skill: (newItem.unique_skill || '').trim() || null,
+        attack_speed_bonus: Number(newItem.attack_speed_bonus || 0),
+        hp_bonus: Number(newItem.hp_bonus || 0),
+        attack_bonus: Number(newItem.attack_bonus || 0),
+        defense_bonus: Number(newItem.defense_bonus || 0),
+        accuracy_bonus: Number(newItem.accuracy_bonus || 0),
+      }, { headers })
+      setNewItem({ image_url: '', slot: 'weapon', name: '', description: '', hp_bonus: 0, attack_bonus: 0, defense_bonus: 0, accuracy_bonus: 0, attack_speed_bonus: 0, unique_skill: '' })
+      await loadAdminPanel()
+    } catch (err) {
+      setAdminItemError(err.response?.data?.detail || 'Не удалось создать предмет')
+    }
   }
 
   const grantItemToUser = async (itemId) => {
-    if (!selectedGrantUserId) return
-    await api.post(`/api/master-admin/items/${itemId}/grant`, {
-      user_id: Number(selectedGrantUserId),
-      quantity: Math.max(1, Number(grantQuantity || 1)),
-    }, { headers })
-    await loadAdminPanel()
+    if (!selectedGrantUserId) {
+      alert('Выберите пользователя-игрока для выдачи предмета')
+      return
+    }
+    try {
+      await api.post(`/api/master-admin/items/${itemId}/grant`, {
+        user_id: Number(selectedGrantUserId),
+        quantity: Math.max(1, Number(grantQuantity || 1)),
+      }, { headers })
+      await loadAdminPanel()
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Не удалось выдать предмет')
+    }
   }
 
   const updateAdminUserDraft = (userId, field, value) => {
@@ -644,6 +833,32 @@ export function App() {
     })
   }, [token, isAdmin])
 
+  useEffect(() => {
+    if (!token || activeTab !== 'profile') return
+
+    const refreshInventory = () => {
+      loadInventory().catch(() => {
+        // noop
+      })
+    }
+
+    refreshInventory()
+    const inventoryPoll = setInterval(refreshInventory, 10000)
+    window.addEventListener('focus', refreshInventory)
+
+    return () => {
+      clearInterval(inventoryPoll)
+      window.removeEventListener('focus', refreshInventory)
+    }
+  }, [token, activeTab])
+
+  useEffect(() => {
+    if (!token || activeTab !== 'boss') return
+    loadRaidState()
+    const timer = setInterval(loadRaidState, 2000)
+    return () => clearInterval(timer)
+  }, [token, activeTab])
+
 
   if (!token) {
     return <div className="auth-page"><form className="auth-card card" onSubmit={authMode === 'login' ? login : register}><h1>{authMode === 'login' ? 'Вход' : 'Регистрация'}</h1>{authError && <div className="auth-error">{authError}</div>}<input name="username" placeholder="Логин" required /><input name="password" type="password" placeholder="Пароль" required />{authMode === 'register' && <input name="confirmPassword" type="password" placeholder="Повторите пароль" required />}<button type="submit">{authMode === 'login' ? 'Войти' : 'Создать аккаунт'}</button><button type="button" className="link-btn" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? 'Нет аккаунта? Регистрация' : 'Уже есть аккаунт? Вход'}</button></form></div>
@@ -671,27 +886,29 @@ export function App() {
 
           <section className="posts-column">
             <section className="posts-scroll-block">
-              {posts.map((p) => (
-                <div key={p.id} className="post-shell" onMouseEnter={() => setHoveredPostId(p.id)} onMouseLeave={() => setHoveredPostId(null)}>
+              {posts.map((p) => {
+                const postImages = (p.media_urls?.length ? p.media_urls : (p.image_url ? [p.image_url] : []))
+                return (
+                <div key={p.id} className="post-shell" onMouseEnter={() => setHoveredPostId(p.id)} onMouseLeave={() => setHoveredPostId(null)} onContextMenu={(e) => { if (!isBoss) return; e.preventDefault(); setPostContextMenu({ open: true, x: e.clientX, y: e.clientY, postId: p.id }) }}>
                   <article id={`post-${p.id}`} className="tg-post card" onClick={() => markRead(p.id)}>
-                    {p.image_url && <img className="post-image" src={`${api.defaults.baseURL}${p.image_url}`} alt="media" />}
+                    {postImages.length > 0 && <div className="post-media-grid">{postImages.map((url, idx) => <button type="button" key={`${url}-${idx}`} className="post-media-button" onClick={(e) => { e.stopPropagation(); openImageViewer(postImages, idx) }}><img className="post-image" src={`${api.defaults.baseURL}${url}`} alt="media" /></button>)}</div>}
                     {p.video_url && <video className="post-video" controls src={`${api.defaults.baseURL}${p.video_url}`} />}
                     <div className="post-body">
                       <p className="post-text">{p.content}</p>
                       <div className="post-meta"><span className="views-right">Просмотры: {p.views}</span></div>
                       <button className="comments-full" onClick={(e) => { e.stopPropagation(); openComments(p) }}><span>{p.comment_count > 0 ? `Комментариев ${p.comment_count}` : 'Прокомментировать'}</span><span className="row-arrow">›</span></button>
-                      {isBoss && <button className="delete-post-btn" onClick={(e) => { e.stopPropagation(); deletePost(p.id) }}>Удалить пост</button>}
                     </div>
                   </article>
 
                   {hoveredPostId === p.id && <div className="hover-reactions-vertical">{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji}</button>)}</div>}
                   <div className="reactions-summary under-post">{Object.entries(p.reactions || {}).map(([emoji, count]) => <button className={`reaction-capsule ${p.my_reaction === emoji ? 'mine' : ''}`} key={emoji} onClick={(e) => { e.stopPropagation(); react(p.id, emoji) }}>{emoji} {count}</button>)}</div>
                 </div>
-              ))}
+              )})}
             </section>
 
-            {isBoss && <form className="post-input-wrap" onSubmit={createPost}>{postMedia && <div className="composer-preview">{postMedia.type === 'image' ? <img src={`${api.defaults.baseURL}${postMedia.url}`} alt="preview" /> : <video controls src={`${api.defaults.baseURL}${postMedia.url}`} />}</div>}<div className="post-input-row"><button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button><span className="input-v-sep" aria-hidden="true">|</span><input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,video/*" onChange={async (e) => e.target.files?.[0] && setPostMedia(await uploadMedia(e.target.files[0]))} /><input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" /><button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button></div></form>}
+            {isBoss && <form className="post-input-wrap" onSubmit={createPost}>{postMedia.length > 0 && <div className="composer-preview thumbs">{postMedia.map((m, idx) => <div key={`${m.url}-${idx}`} className="preview-thumb-wrap"><img src={`${api.defaults.baseURL}${m.url}`} alt="preview" /><button type="button" className="preview-remove" onClick={() => removeMediaAttachment(idx, setPostMedia)}>✕</button></div>)}</div>}<div className="post-input-row"><button type="button" className="clip-btn" onClick={() => fileInputRef.current?.click()}>📎</button><span className="input-v-sep" aria-hidden="true">|</span><input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept="image/*" onChange={async (e) => { if (e.target.files?.length) await addMediaAttachment(e.target.files, setPostMedia); e.target.value = '' }} /><input value={newPostText} onChange={(e) => setNewPostText(e.target.value)} placeholder="Текст поста" /><button type="submit" className="post-send-btn" disabled={uploading}>{uploading ? '…' : '›'}</button></div></form>}
           </section>
+          {postContextMenu.open && <div className="post-context-menu" style={{ left: postContextMenu.x, top: postContextMenu.y }} onClick={(e) => e.stopPropagation()}><button type="button" className="post-context-delete" onClick={async () => { if (!postContextMenu.postId) return; await deletePost(postContextMenu.postId); setPostContextMenu({ open: false, x: 0, y: 0, postId: null }) }}>Удалить пост</button></div>}
         </main>
       )}
 
@@ -712,14 +929,17 @@ export function App() {
 
           <section className="posts-column">
             <section className="posts-scroll-block chat-box no-radius">
-              {chat.map((m, i) => <div key={m.id || i} className="chat-message"><b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {m.media_url && <img className="chat-inline-image" src={`${api.defaults.baseURL}${m.media_url}`} alt="chat-media" />} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>)}
+              {chat.map((m, i) => {
+                const mediaItems = (m.media_urls?.length ? m.media_urls : (m.media_url ? [m.media_url] : []))
+                return <div key={m.id || i} className="chat-message">{m.avatar_data ? <img src={m.avatar_data} alt="avatar" className="chat-user-avatar-image" /> : <span className="chat-user-avatar" style={{ backgroundColor: m.nickname_color || '#50608a' }}>{chatAvatarLetter(m.username || `#${m.user_id}`)}</span>}<b style={{ color: m.nickname_color || "#cfd8ff" }}>{m.username || `#${m.user_id}`}{m.role === "boss" ? " #босс" : ""}</b>{m.content ? ": " : ""}{m.content} {mediaItems.map((url) => <img key={url} className="chat-inline-image" src={`${api.defaults.baseURL}${url}`} alt="chat-media" />)} {canManageSelectedRoom && <button onClick={() => removeMessage(m.id)}>Удалить</button>}</div>
+              })}
             </section>
             <div className="chat-input-wrap">
             {slowmodeNotice && <div className="slowmode-notice">{slowmodeNotice}</div>}
-            {chatMedia && <div className="chat-media-preview"><img src={`${api.defaults.baseURL}${chatMedia.url}`} alt="preview" /></div>}
+            {chatMedia.length > 0 && <div className="chat-media-preview thumbs">{chatMedia.map((m, idx) => <div key={`${m.url}-${idx}`} className="preview-thumb-wrap"><img src={`${api.defaults.baseURL}${m.url}`} alt="preview" /><button type="button" className="preview-remove" onClick={() => removeMediaAttachment(idx, setChatMedia)}>✕</button></div>)}</div>}
             <div className="chat-input no-radius">
               <button type="button" className="clip-btn" onClick={() => chatFileInputRef.current?.click()}>📎</button>
-              <input type="file" ref={chatFileInputRef} style={{ display: "none" }} accept="image/*" onChange={async (e) => e.target.files?.[0] && setChatMedia(await uploadMedia(e.target.files[0]))} />
+              <input type="file" ref={chatFileInputRef} style={{ display: "none" }} multiple accept="image/*" onChange={async (e) => { if (e.target.files?.length) await addMediaAttachment(e.target.files, setChatMedia); e.target.value = '' }} />
               <input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Сообщение" />
               <button className="post-send-btn" onClick={sendMessage}>➤</button>
             </div>
@@ -730,8 +950,11 @@ export function App() {
           <aside className="chat-settings">
             <h3>Настройки чата</h3>
             {selectedRoom && canManageSelectedRoom ? <>
+              <input ref={chatSettingsAvatarInputRef} type="file" style={{ display: 'none' }} accept="image/*" onChange={async (e) => { if (!e.target.files?.[0]) return; const uploaded = await uploadMedia(e.target.files[0]); await patchRoomSettings({ avatar_url: uploaded.url }); e.target.value = '' }} />
               <div className="setting-row"><span>Медиа</span><label className="switch"><input type="checkbox" checked={selectedRoom.allow_media} onChange={(e) => patchRoomSettings({ allow_media: e.target.checked })} /><span className="slider" /></label></div>
               <div className="setting-row cooldown-row"><span>Кулдаун</span><label className="switch"><input type="checkbox" checked={selectedRoom.cooldown_enabled} onChange={(e) => patchRoomSettings({ cooldown_enabled: e.target.checked })} /><span className="slider" /></label><input className="cooldown-input" type="number" value={selectedRoom.cooldown_seconds || 0} min={0} onChange={(e) => patchRoomSettings({ cooldown_seconds: Number(e.target.value), cooldown_enabled: false })} placeholder="сек" /></div>
+              <div className="setting-row"><span>Название</span><input value={roomNameDraft} onChange={(e) => setRoomNameDraft(e.target.value)} onBlur={() => roomNameDraft.trim() && roomNameDraft !== selectedRoom.name && patchRoomSettings({ name: roomNameDraft })} /></div>
+              <div className="setting-row"><span>Аватар чата</span><button type="button" onClick={() => chatSettingsAvatarInputRef.current?.click()}>Загрузить</button></div>
               <div className="setting-row"><span>Код входа</span><div className="join-code-value inline">{selectedRoom.join_code || '—'}</div></div>
               <div className="chat-members"><div className="chat-members-title">Участники</div>{roomMembers.map((member) => <div key={member.id} className="chat-member-item" style={{ color: member.nickname_color || '#cfd8ff' }}>{member.username}{member.role === 'boss' ? ' #босс' : ''}</div>)}</div>
               {!selectedRoom.is_main && <button className="danger-btn" onClick={() => deleteRoom(selectedRoom.id)}>Удалить чат</button>}
@@ -797,19 +1020,18 @@ export function App() {
 
           <section className="inventory-panel card">
             <h3>Инвентарь</h3>
-            <div className="inventory-list">
+            <div className="inventory-grid">
               {inventory.length === 0 && <p className="inventory-empty">Инвентарь пуст.</p>}
               {inventory.map((item) => (
-                <article key={item.id} className="inventory-item">
-                  <div>
-                    <h4>{item.name}</h4>
-                    <p>{item.description || 'Описание появится позже'}</p>
-                    <small>
-                      HP +{item.hp_bonus || 0} · Урон +{item.attack_bonus || 0} · Защита +{item.defense_bonus || 0} · Точность +{item.accuracy_bonus || 0}% · Скорость +{item.attack_speed_bonus || 0}
-                    </small>
-                  </div>
-                  <button onClick={() => equipItem(item)}>Экипировать</button>
-                </article>
+                <button
+                  key={item.inventory_entry_id || `${item.id}-${item.name}`}
+                  type="button"
+                  className="inventory-tile"
+                  onClick={() => setInventoryModalItem(item)}
+                >
+                  <img src={item.image_url ? toApiMediaUrl(item.image_url) : 'https://placehold.co/72x72/131a2c/fff?text=I'} alt={item.name} />
+                  <span>{item.name}</span>
+                </button>
               ))}
             </div>
           </section>
@@ -820,8 +1042,20 @@ export function App() {
           <section className="card admin-create-item">
             <h3>Создание предмета</h3>
             <div className="admin-item-form">
-              <label>Картинка предмета (URL)</label>
-              <input value={newItem.image_url} placeholder="Картинка (URL)" onChange={(e) => setNewItem((p) => ({ ...p, image_url: e.target.value }))} />
+              <label>Картинка предмета</label>
+              <input ref={adminItemImageInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={async (e) => { if (!e.target.files?.[0]) return; const uploaded = await uploadMedia(e.target.files[0]); setNewItem((p) => ({ ...p, image_url: uploaded.url })); e.target.value = '' }} />
+              <button type="button" onClick={() => adminItemImageInputRef.current?.click()}>Загрузить с ПК</button>
+              {newItem.image_url && <img src={toApiMediaUrl(newItem.image_url)} alt="item-preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid #3a4460' }} />}
+              <label>Тип предмета (слот)</label>
+              <select value={newItem.slot} onChange={(e) => setNewItem((p) => ({ ...p, slot: e.target.value }))}>
+                <option value="weapon">Оружие</option>
+                <option value="shield">Щит</option>
+                <option value="helmet">Шлем</option>
+                <option value="armor">Броня</option>
+                <option value="boots">Обувь</option>
+                <option value="amulet">Амулет</option>
+                <option value="ring">Кольцо</option>
+              </select>
               <label>Название предмета</label>
               <input value={newItem.name} placeholder="Название" onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} />
               <label>Описание предмета</label>
@@ -838,6 +1072,7 @@ export function App() {
               <input type="number" step="0.01" value={newItem.attack_speed_bonus} placeholder="Скорость атаки" onChange={(e) => setNewItem((p) => ({ ...p, attack_speed_bonus: e.target.value }))} />
               <label>Уникальное умение (макс. 1 на предмет, пока в разработке)</label>
               <input value={newItem.unique_skill} placeholder="Уникальное умение (макс. 1, в разработке)" onChange={(e) => setNewItem((p) => ({ ...p, unique_skill: e.target.value }))} />
+              {adminItemError && <div className="auth-error">{adminItemError}</div>}
               <button onClick={createAdminItem}>Создать предмет</button>
             </div>
           </section>
@@ -898,7 +1133,7 @@ export function App() {
             <div className="admin-item-list">
               {adminItems.map((item) => (
                 <article key={item.id} className="admin-item-row">
-                  <img src={item.image_url || 'https://placehold.co/56x56/131a2c/fff?text=I'} alt={item.name} />
+                  <img src={item.image_url ? toApiMediaUrl(item.image_url) : 'https://placehold.co/56x56/131a2c/fff?text=I'} alt={item.name} />
                   <div>
                     <h4>{item.name}</h4>
                     <p>{item.description}</p>
@@ -914,7 +1149,69 @@ export function App() {
         </main>
       )}
 
-            {activeTab === 'boss' && <main className="card"><h2>БоссБатл</h2><p>Арена в разработке</p></main>}
+            {activeTab === 'boss' && (
+              <main className="boss-page card">
+                <section className="boss-battlefield">
+                  <div className="boss-sky" />
+                  <div className="boss-ground" />
+                  <div className="boss-entity">👹 {raidState.active ? (raidState.boss_name || 'Босс') : 'Поле сражения'}</div>
+                </section>
+
+                <aside className="boss-side">
+                  <div className="card">
+                    <h3>Ваш профиль</h3>
+                    <p><b>{me?.username}</b> · HP: {me?.hp}</p>
+                    {!raidState.active && <p>Рейд неактивен. Ожидаем появления босса.</p>}
+                    {!raidState.active && isBoss && <button onClick={startRaid}>Запустить рейд</button>}
+                  </div>
+
+                  {raidState.active && (
+                    <div className="card">
+                      <h3>Состояние рейда</h3>
+                      <p>Фаза: {raidState.phase === 'signup' ? 'Набор (2 мин)' : (raidState.phase === 'players' ? 'Ход игроков' : 'Ход босса')}</p>
+                      <p>ХП босса: {raidState.boss_hp} / {raidState.boss_max_hp || raidState.boss_hp}</p>
+                      <p>Ход: {raidState.turn || 0}</p>
+                      <small>{raidState.last_log || ''}</small>
+                    </div>
+                  )}
+
+                  {raidState.active && raidState.phase === 'signup' && (
+                    <div className="card">
+                      <h3>Запись в рейд</h3>
+                      <select value={raidPosition} onChange={(e) => setRaidPosition(e.target.value)}>
+                        <option value="defense">Оборона</option>
+                        <option value="attack">Атака</option>
+                        <option value="support">Поддержка</option>
+                      </select>
+                      <button onClick={joinRaid}>Записаться</button>
+                    </div>
+                  )}
+
+                  {raidState.active && raidState.phase === 'players' && (
+                    <div className="card">
+                      <h3>Действие на ход</h3>
+                      <div className="boss-actions">
+                        <button className={raidAction === 'attack' ? 'active' : ''} onClick={() => sendRaidAction('attack')}>Атака</button>
+                        <button className={raidAction === 'defend' ? 'active' : ''} onClick={() => sendRaidAction('defend')}>Оборона</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {raidState.active && (
+                    <div className="card">
+                      <h3>Позиции</h3>
+                      <div className="boss-position-stats">
+                        {['defense','attack','support'].map((pos) => {
+                          const members = Object.values(raidState.participants || {}).filter((p) => p.position === pos && p.alive)
+                          const hpSum = members.reduce((acc, p) => acc + (p.hp || 0), 0)
+                          return <div key={pos}><b>{pos}</b><span>{members.length} чел · {hpSum} HP</span></div>
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </aside>
+              </main>
+            )}
 
       {showChannelModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый канал</h3><input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="Название канала" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewChannelAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowChannelModal(false)}>Отмена</button><button onClick={createChannel}>Создать</button></div></div></div>}
       {showRoomModal && <div className="modal-backdrop"><div className="modal card"><h3>Новый чат</h3><input value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)} placeholder="Название чата" /><input type="file" accept="image/*" onChange={async (e) => e.target.files?.[0] && setNewRoomAvatar((await uploadMedia(e.target.files[0])).url)} /><div className="channel-modal-actions"><button onClick={() => setShowRoomModal(false)}>Отмена</button><button onClick={createRoom}>Создать</button></div></div></div>}
@@ -963,6 +1260,27 @@ export function App() {
         </div>
       )}
 
+
+      {imageViewer.open && <div className="image-viewer-overlay" onClick={closeImageViewer}><button type="button" className="image-viewer-close" onClick={(e) => { e.stopPropagation(); closeImageViewer() }}>✕</button><div className="image-viewer-edge left" onClick={(e) => { e.stopPropagation(); switchViewerImage(-1) }}><button type="button" className="image-viewer-arrow" aria-label="Предыдущее изображение">❮</button></div><img className="image-viewer-photo" src={`${api.defaults.baseURL}${imageViewer.images[imageViewer.index]}`} alt="full" onClick={(e) => e.stopPropagation()} /><div className="image-viewer-edge right" onClick={(e) => { e.stopPropagation(); switchViewerImage(1) }}><button type="button" className="image-viewer-arrow" aria-label="Следующее изображение">❯</button></div></div>}
+
+      {inventoryModalItem && (
+        <div className="modal-backdrop" onClick={() => setInventoryModalItem(null)}>
+          <div className="modal card inventory-item-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="inventory-modal-close" onClick={() => setInventoryModalItem(null)}>✕</button>
+            <img src={inventoryModalItem.image_url ? toApiMediaUrl(inventoryModalItem.image_url) : 'https://placehold.co/112x112/131a2c/fff?text=I'} alt={inventoryModalItem.name} />
+            <h3>{inventoryModalItem.name}</h3>
+            <p>{inventoryModalItem.description || 'Описание появится позже'}</p>
+            <div className="inventory-modal-stats">
+              <small>HP +{inventoryModalItem.hp_bonus || 0}</small>
+              <small>Урон +{inventoryModalItem.attack_bonus || 0}</small>
+              <small>Защита +{inventoryModalItem.defense_bonus || 0}</small>
+              <small>Точность +{inventoryModalItem.accuracy_bonus || 0}%</small>
+              <small>Скорость +{inventoryModalItem.attack_speed_bonus || 0}</small>
+            </div>
+            <button className="inventory-modal-equip" onClick={() => { equipItem(inventoryModalItem); setInventoryModalItem(null) }}>Экипировать</button>
+          </div>
+        </div>
+      )}
 
       {commentModalPost && <div className="modal-backdrop"><div className="modal card"><div className="comments-header"><button className="close-top" onClick={() => setCommentModalPost(null)}>✕</button><span className="header-sep">|</span><h3>Комментарии</h3></div><div className="comments-list fixed" ref={commentsRef}>{comments.length === 0 ? <div className="empty-comments">Комментариев пока нет</div> : comments.map((c) => <div key={c.id}><b>{c.username}</b>: {c.content}</div>)}<button className="scroll-down-round" onClick={() => commentsRef.current?.scrollTo({ top: commentsRef.current.scrollHeight, behavior: 'smooth' })}>↓</button></div><div className="comment-input-wrap"><input value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} placeholder="Комментарий" /><div className="comment-actions-right"><button className="emoji-inside-btn" onClick={() => setShowCommentEmoji(!showCommentEmoji)}>☺</button><button className="send-inline" onClick={sendComment}>›</button>{showCommentEmoji && <div className="emoji-picker-vertical" onMouseLeave={() => setShowCommentEmoji(false)}>{ALL_REACTIONS.map((emoji) => <button key={emoji} onClick={() => setCommentDraft((v) => v + emoji)}>{emoji}</button>)}</div>}</div></div></div></div>}
     </div>

@@ -30,9 +30,10 @@ from .models import (
     RoomUserState,
     User,
 )
-from .raid import boss_auto_attack, get_raid_state, player_attack, start_raid, stop_raid
+from .raid import boss_auto_attack, get_raid_state, join_raid, player_attack, progress_raid_turn, start_raid, stop_raid, submit_action
 from .schemas import (
     AttackOut,
+    AvatarUpdateIn,
     BanIn,
     BossIn,
     ChannelIn,
@@ -66,8 +67,10 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 def apply_compat_migrations():
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_read_post_id INTEGER"))
+        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT DEFAULT ''"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS audio_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS channel_id INTEGER"))
+        connection.execute(text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb"))
 
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_main BOOLEAN DEFAULT FALSE"))
@@ -79,11 +82,23 @@ def apply_compat_migrations():
         connection.execute(text("ALTER TABLE room_members ADD COLUMN IF NOT EXISTS nickname_color VARCHAR(16) DEFAULT '#9fc5ff'"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url VARCHAR(255) DEFAULT ''"))
         connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(32) DEFAULT ''"))
+        connection.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_urls JSONB DEFAULT '[]'::jsonb"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS hp_bonus INTEGER DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS accuracy_bonus INTEGER DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS attack_speed_bonus DOUBLE PRECISION DEFAULT 0"))
         connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS unique_skill VARCHAR(255)"))
+        connection.execute(text("ALTER TABLE items ADD COLUMN IF NOT EXISTS slot VARCHAR(32) DEFAULT 'weapon'"))
+        connection.execute(text("ALTER TABLE inventories ADD COLUMN IF NOT EXISTS equipped BOOLEAN DEFAULT FALSE"))
+
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS inventories (
+                id SERIAL PRIMARY KEY,
+                player_id INTEGER REFERENCES users(id),
+                item_id INTEGER REFERENCES items(id),
+                equipped BOOLEAN DEFAULT FALSE
+            )
+        """))
 
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS room_members (
@@ -268,6 +283,15 @@ def me(user: User = Depends(get_current_user)):
     return user
 
 
+
+
+@app.patch("/api/me/avatar", response_model=UserOut)
+def update_my_avatar(payload: AvatarUpdateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    user.avatar_data = (payload.avatar_data or "")[:2_000_000]
+    db.commit()
+    db.refresh(user)
+    return user
+
 @app.post("/api/raid/start")
 def raid_start(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     active_boss = db.query(Boss).filter(Boss.is_active.is_(True)).first()
@@ -290,8 +314,28 @@ def raid_stop(user: User = Depends(require_roles("master_admin", "admin", "boss"
 
 
 @app.get("/api/raid/state")
-def raid_state():
-    return get_raid_state() or {"active": False}
+def raid_state(db: Session = Depends(get_db)):
+    try:
+        return progress_raid_turn(db)
+    except ValueError:
+        return get_raid_state() or {"active": False}
+
+
+@app.post("/api/raid/join")
+def raid_join(position: str = Query(...), user: User = Depends(require_roles("player", "master_admin", "admin")), db: Session = Depends(get_db)):
+    try:
+        return join_raid(db, user, position)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/raid/action")
+def raid_action(action: str = Query(...), user: User = Depends(require_roles("player", "master_admin", "admin")), db: Session = Depends(get_db)):
+    try:
+        submit_action(user, action)
+        return progress_raid_turn(db)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/raid/attack", response_model=AttackOut)
@@ -517,12 +561,15 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
     content = (payload.content or "").strip()
     media_url = (payload.media_url or "").strip()
     media_type = (payload.media_type or "").strip()
-    if not content and not media_url:
+    media_urls = [url.strip() for url in (payload.media_urls or []) if url and url.strip()]
+    if media_url and media_url not in media_urls:
+        media_urls.insert(0, media_url)
+    if not content and not media_urls:
         raise HTTPException(400, "Message is empty")
 
-    if media_url and not room.allow_media:
+    if media_urls and not room.allow_media:
         raise HTTPException(400, "Media disabled in this room")
-    if media_url and media_type and media_type != "image":
+    if media_urls and media_type and media_type != "image":
         raise HTTPException(400, "Only images are allowed in chat messages")
 
     if user.role != "boss" and room.cooldown_enabled and room.cooldown_seconds > 0:
@@ -538,7 +585,14 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
             db.add(state)
         state.last_message_at = datetime.utcnow()
 
-    msg = Message(room_id=payload.room_id, user_id=user.id, content=content or "", media_url=media_url, media_type=media_type)
+    msg = Message(
+        room_id=payload.room_id,
+        user_id=user.id,
+        content=content or "",
+        media_url=(media_urls[0] if media_urls else ""),
+        media_type=(media_type or ("image" if media_urls else "")),
+        media_urls=media_urls,
+    )
     db.add(msg)
     db.commit()
     db.refresh(msg)
@@ -550,9 +604,11 @@ def send_message(payload: MessageIn, user: User = Depends(get_current_user), db:
         "username": user.username,
         "role": user.role,
         "nickname_color": (member.nickname_color if member and member.nickname_color else _pastel_from_seed(msg.room_id, msg.user_id)),
+        "avatar_data": user.avatar_data or "",
         "content": msg.content,
         "media_url": msg.media_url,
         "media_type": msg.media_type,
+        "media_urls": msg.media_urls or ([msg.media_url] if msg.media_url else []),
         "created_at": msg.created_at,
     }
 
@@ -566,7 +622,7 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
     if not is_member and not (room.is_main and user.role == "boss"):
         raise HTTPException(403, "You are not a member of this room")
     rows = (
-        db.query(Message, User.username, User.role, RoomMember.nickname_color)
+        db.query(Message, User.username, User.role, RoomMember.nickname_color, User.avatar_data)
         .join(User, User.id == Message.user_id)
         .outerjoin(RoomMember, (RoomMember.room_id == Message.room_id) & (RoomMember.user_id == Message.user_id))
         .filter(Message.room_id == room_id)
@@ -582,12 +638,14 @@ def room_messages(room_id: int, user: User = Depends(get_current_user), db: Sess
             "username": username,
             "role": role,
             "nickname_color": nickname_color or _pastel_from_seed(msg.room_id, msg.user_id),
+            "avatar_data": avatar_data or "",
             "content": msg.content,
             "media_url": msg.media_url,
             "media_type": msg.media_type,
+            "media_urls": msg.media_urls or ([msg.media_url] if msg.media_url else []),
             "created_at": msg.created_at,
         }
-        for msg, username, role, nickname_color in rows
+        for msg, username, role, nickname_color, avatar_data in rows
     ]
 
 
@@ -691,7 +749,14 @@ def create_post(payload: PostIn, user: User = Depends(require_roles("boss")), db
     if payload.channel_id is not None and not db.query(Channel).filter(Channel.id == payload.channel_id).first():
         raise HTTPException(404, "Channel not found")
 
-    post = Post(**payload.model_dump(), created_by=user.id)
+    media_urls = [url.strip() for url in (payload.media_urls or []) if url and url.strip()]
+    payload_data = payload.model_dump()
+    if payload.image_url and payload.image_url not in media_urls:
+        media_urls.insert(0, payload.image_url)
+    payload_data["media_urls"] = media_urls
+    payload_data["image_url"] = media_urls[0] if media_urls else (payload.image_url or "")
+
+    post = Post(**payload_data, created_by=user.id)
     db.add(post)
     db.commit()
     db.refresh(post)
@@ -806,6 +871,7 @@ def list_posts(channel_id: int | None = Query(default=None), user: User = Depend
             "image_url": p.image_url,
             "video_url": p.video_url,
             "audio_url": p.audio_url,
+            "media_urls": p.media_urls or ([p.image_url] if p.image_url else []),
             "channel_id": p.channel_id,
             "author": username,
             "created_at": p.created_at,
@@ -948,11 +1014,17 @@ def update_loot(item_id: int, payload: LootUpdateIn, _: User = Depends(require_r
 
 @app.post("/api/master-admin/items")
 def create_item(payload: ItemCreateIn, _: User = Depends(require_roles("master_admin", "admin")), db: Session = Depends(get_db)):
+    allowed_slots = {"weapon", "shield", "helmet", "armor", "boots", "amulet", "ring"}
+    slot = (payload.slot or "weapon").strip().lower()
+    if slot not in allowed_slots:
+        raise HTTPException(400, "Unsupported item slot")
+
     item = Item(
         name=payload.name.strip(),
         description=payload.description.strip(),
         rarity="custom",
         image_url=payload.image_url,
+        slot=slot,
         hp_bonus=payload.hp_bonus,
         attack_bonus=payload.attack_bonus,
         defense_bonus=payload.defense_bonus,
@@ -991,6 +1063,7 @@ def admin_list_items(_: User = Depends(require_roles("master_admin", "admin")), 
             "name": item.name,
             "description": item.description,
             "image_url": item.image_url,
+            "slot": item.slot or "weapon",
             "hp_bonus": item.hp_bonus,
             "attack_bonus": item.attack_bonus,
             "defense_bonus": item.defense_bonus,
@@ -1035,10 +1108,12 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
     )
     return [
         {
+            "inventory_entry_id": inv.id,
             "id": item.id,
             "name": item.name,
             "description": item.description,
             "image_url": item.image_url,
+            "slot": item.slot or "weapon",
             "hp_bonus": item.hp_bonus,
             "attack_bonus": item.attack_bonus,
             "defense_bonus": item.defense_bonus,
@@ -1050,6 +1125,53 @@ def inventory(user: User = Depends(get_current_user), db: Session = Depends(get_
         for inv, item in rows
     ]
 
+
+
+
+@app.post("/api/inventory/{entry_id}/equip")
+def equip_inventory_item(entry_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    inv = db.query(Inventory).filter(Inventory.id == entry_id, Inventory.player_id == user.id).first()
+    if not inv:
+        raise HTTPException(404, "Inventory entry not found")
+
+    item = db.query(Item).filter(Item.id == inv.item_id).first()
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    slot = (item.slot or "weapon").lower()
+    if slot == "ring":
+        ring_item_ids = [row[0] for row in db.query(Item.id).filter(Item.slot == "ring").all()]
+        equipped_ring_count = db.query(Inventory).filter(
+            Inventory.player_id == user.id,
+            Inventory.equipped.is_(True),
+            Inventory.item_id.in_(ring_item_ids),
+            Inventory.id != inv.id,
+        ).count() if ring_item_ids else 0
+        if equipped_ring_count >= 2:
+            raise HTTPException(400, "No free ring slot")
+    else:
+        slot_item_ids = [row[0] for row in db.query(Item.id).filter(Item.slot == slot).all()]
+        if slot_item_ids:
+            db.query(Inventory).filter(
+                Inventory.player_id == user.id,
+                Inventory.equipped.is_(True),
+                Inventory.item_id.in_(slot_item_ids),
+                Inventory.id != inv.id,
+            ).update({Inventory.equipped: False}, synchronize_session=False)
+
+    inv.equipped = True
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/inventory/{entry_id}/unequip")
+def unequip_inventory_item(entry_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    inv = db.query(Inventory).filter(Inventory.id == entry_id, Inventory.player_id == user.id).first()
+    if not inv:
+        raise HTTPException(404, "Inventory entry not found")
+    inv.equipped = False
+    db.commit()
+    return {"ok": True}
 
 @app.websocket("/ws/{room}")
 async def websocket_room(ws: WebSocket, room: str):

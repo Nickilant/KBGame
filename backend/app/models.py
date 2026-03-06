@@ -19,6 +19,7 @@ class User(Base):
     level = Column(Integer, default=1)
     gold = Column(Integer, default=0)
     last_read_post_id = Column(Integer, nullable=True)
+    avatar_data = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -48,6 +49,7 @@ class Item(Base):
     accuracy_bonus = Column(Integer, default=0)
     attack_speed_bonus = Column(Float, default=0)
     image_url = Column(String(255), default="")
+    slot = Column(String(32), default="weapon")
     unique_skill = Column(String(255), nullable=True)
     drop_chance = Column(Float, default=0.1)
 
@@ -84,6 +86,7 @@ class Message(Base):
     content = Column(Text, nullable=False)
     media_url = Column(String(255), default="")
     media_type = Column(String(32), default="")
+    media_urls = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -140,6 +143,7 @@ class Post(Base):
     image_url = Column(String(255), default="")
     video_url = Column(String(255), default="")
     audio_url = Column(String(255), default="")
+    media_urls = Column(JSON, default=list)
     channel_id = Column(Integer, ForeignKey("channels.id"), nullable=True, index=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
